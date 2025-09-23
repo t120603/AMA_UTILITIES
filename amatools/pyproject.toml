@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amatools"
+version = "0.0.4"
+description = "model inference and metadata analysis toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["loguru", 
+				"shapely", "func_timeout",
+                "numpy", "pillow", 
+				"openslide-python",
+                "pywin32", 
+				"PyYAML",
+				"psutil",
+				"datetime",
+				"wmi", "GPUtil",
+				"tqdm",
+			    ]
+
+[project.scripts]
+ama-go = "amatools.cli:main"

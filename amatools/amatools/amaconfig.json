@@ -1,0 +1,16 @@
+{
+    "localdrive": {
+        "home": "D:\\workfolder",
+        "modelwatch": "D:\\workfolder\\modelwatch",
+        "imgbackup": "D:\\workfolder\\imgbackup"
+    },
+    "decart": {
+        "version": "2.7.4",
+        "binpath": "C:\\bin\\DeCart\\decart2.7.4",
+        "config": "C:\\ProgramData\\DeCart\\config.yaml"
+    },
+    "metadata": {
+        "db_uro": "metadataURO.db",
+        "db_thy": "metadataTHY.db"
+    }
+}
