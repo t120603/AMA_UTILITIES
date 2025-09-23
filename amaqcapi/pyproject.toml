@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ama_qcapi"
+version = "0.1.8"
+description = "APIs for querying QC reference data"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["fastapi", "uvicorn", "pydantic", 
+                "loguru", 
+				"PyYAML",
+				"datetime",
+				"pathlib",
+				"psutil",
+			   ]
+
+[project.scripts]
+qcapi-cch = "qcapi_cch.cli:main"

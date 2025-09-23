@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watch_wsi"
+version = "0.1.11"
+description = "monitor changes in scanner folders and decart 'done' folder, execute tasks accordingly"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["loguru", 
+				"pywin32", 
+				"PyYAML",
+				"psutil",
+				"datetime", "pathlib",
+				"openslide-python",
+			    ]
+
+[project.scripts]
+watch-wsi = "watchcch.cli:watchwsi"
