@@ -10,7 +10,8 @@ import json, yaml
 import time
 import win32wnet, pywintypes
 from .taskfunc import stopDeCart, restartDeCart
-from .metafunc import saveInferenceResult2CSV
+from .metafunc import saveInferenceResult2CSV, saveAnalyzedMetadata2DB4QC
+from .amafuncs import doModelInference
 from loguru import logger
 
 ##---------------------------------------------------------
@@ -62,7 +63,7 @@ def initConfig4WatchWSI(thisconfig=None, isCmdRunningDeCart=False):
             "userY": "aibadmin",
             "passY": "aibadmin12345",
             'home_qcapi': r"E:\ama_qcapi\this_scanner",
-            "home_qcdb": r'E:\ama_qcapi\this_scanner\dbmeta'
+            "home_qcdb": r'E:\ama_qcapi\this_scanner\dbmeta',
 	        "driveXhome": "X:\\CCH_scanner",
             "driveYhome": "Y:\\CCH_scanner\\medaix",
             "decartpath": r"C:\Program Files\WindowsApps\com.aixmed.decart_2.8.14.0_x64__pkjfmh18q18h8",
@@ -227,20 +228,20 @@ def startMonitorFolders(configfile, logfile):
         for file in flist:
             wsitype = os.path.splitext(file)[1].lower()[1:]
             if os.path.isfile(file) and wsitype in MONITORED_WSI:
-            ## found, then copy to destination folder
-            try:
-                shutil.copy(file, decartWatch)
-                if wsitype == 'mrxs':
-                    dirmrxs = os.path.splitext(file)[0]
-                    shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
-                logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
-                bWSIfound = True
-            except Exception as e:
-                logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
+                ## found, then copy to destination folder
+                try:
+                    shutil.copy(file, decartWatch)
+                    if wsitype == 'mrxs':
+                        dirmrxs = os.path.splitext(file)[0]
+                        shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
+                    logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
+                    bWSIfound = True
+                except Exception as e:
+                    logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
         ## WSI files found
         if bWSIfound:
             t0 = time.perf_counter()
-            logger.trace(f"➾ start {whichmodel} inference at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())}")
+            logger.trace(f"➾ start {whichmodel} inference at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
             ## manually running model inference
             aixmeta = doModelInference(decartWatch, modelname=whichmodel)
             ## save metadata of model inference analysis results
@@ -284,20 +285,20 @@ def startMonitorFolders(configfile, logfile):
         for file in flist:
             wsitype = os.path.splitext(file)[1].lower()[1:]
             if os.path.isfile(file) and wsitype in MONITORED_WSI:
-            ## found, then copy to destination folder
-            try:
-                shutil.copy(file, decartWatch)
-                if wsitype == 'mrxs':
-                    dirmrxs = os.path.splitext(file)[0]
-                    shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
-                logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
-                bWSIfound = True
-            except Exception as e:
-                logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
+                ## found, then copy to destination folder
+                try:
+                    shutil.copy(file, decartWatch)
+                    if wsitype == 'mrxs':
+                        dirmrxs = os.path.splitext(file)[0]
+                        shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
+                    logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
+                    bWSIfound = True
+                except Exception as e:
+                    logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
         ## WSI files found
         if bWSIfound:
             t0 = time.perf_counter()
-            logger.trace(f"➾ start {whichmodel} inference at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())}")
+            logger.trace(f"➾ start {whichmodel} inference at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
             ## manually running model inference
             aixmeta = doModelInference(decartWatch, modelname=whichmodel)
             ## save metadata of model inference analysis results
