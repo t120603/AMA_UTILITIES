@@ -1,0 +1,21 @@
+{
+    "_comment0": "driveX is the scanner shared folder",
+    "driveX": "X:",
+    "homeX": "\\\\192.168.42.31\\autoinference",
+    "userX": "Aperio", 
+    "passX": "Sc@nscope123",
+	"driveXhome": "X:\\CCH_scanner",
+    "_comment1": "driveY is on-premise image storage backup folder",
+    "driveY": "Y:",
+    "homeY": "\\\\192.168.42.33\\Auto Inference Backup",
+    "userY": "aibadmin",
+    "passY": "aibadmin12345",
+    "driveYhome": "Y:\\CCH_scanner\\medaix",
+    "_comment2": "working folder in service workstation",
+    "home_qcapi": "E:\\ama_qcapi\\this_scanner",
+    "_comment3": "DeCart relevant information",
+	"decart_ver": "2.7.4",
+    "decartpath": "E:\\bin\\AIxURO\\decart2.7.4",
+	"decart_exe": "E:\\bin\\AIxURO\\decart2.7.4\\decart.exe",
+	"decartyaml": "C:\\ProgramData\\DeCart\\config.yaml"
+}
