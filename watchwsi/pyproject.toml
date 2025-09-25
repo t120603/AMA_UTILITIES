@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watch_wsi"
-version = "0.1.11"
+version = "0.1.12"
 description = "monitor changes in scanner folders and decart 'done' folder, execute tasks accordingly"
 readme = "README.md"
 requires-python = ">=3.8"

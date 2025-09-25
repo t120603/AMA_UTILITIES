@@ -273,13 +273,13 @@ def checkWSIavailable(wsi):
             # Attempt to open a slide file
             slide = openslide.OpenSlide(wsi)
         except FileNotFoundError:
-            logger.error(f'{wsi} file was not found.')
+            logger.error(f'{os.path.basename(wsi)} file was not found.')
             isWSI = False
         except OpenSlideError as e:
             logger.error(f"OpenSlideError: {e} - {os.path.basename(wsi)}")
             isWSI = False
         except Exception as e:
-            logger.error(f"An unexpected error occurred: {e}")
+            logger.error(f"An unexpected error occurred ({os.path.basename(wsi)}): {e}")
             isWSI = False
     return isWSI
 
@@ -350,6 +350,31 @@ def connect2scanner_and_imagestorage(args):
 ## start monitoring scanner/decart watch folders 
 ##---------------------------------------------------------
 def checkCopyWSIcompleted(srcwsi, dstwsi):
+    filecopied = False
+    escape_seconds = 0
+    if checkWSIavailable(srcwsi):
+        src_stat = os.stat(srcwsi)
+        try:
+            shutil.copy(srcwsi, dstwsi)
+            filecopied = True
+        except PermissionError:
+            logger.error(f'insufficient permission to copy the file {os.path.basename(srcwsi)}')
+        except OSError as e:
+            logger.error(f'OS error occurred ({os.path.basename(srcwsi)}): {e}')
+        # check the filesize is identical
+        if filecopied:
+            while True:
+                dst_stat = os.stat(dstwsi)
+                if src_stat.st_size == dst_stat.st_size and src_stat.st_mtime <= dst_stat.st_mtime:
+                    filecopied = True
+                    break
+                time.sleep(10)
+                escape_seconds += 10
+                if escape_seconds > 1200:    ## 20 minutes
+                    logger.error(f'copying {srcwsi} to DeCart watch folder more than {escape_seconds} seconds!!')
+    return filecopied
+
+def OLD_checkCopyWSIcompleted(srcwsi, dstwsi):
     filecopied = False
     if checkWSIavailable(srcwsi):
         escape_seconds = 0
@@ -427,28 +452,38 @@ def startMonitorFolders(configfile, logfile):
                     print('[ERROR] STOP watchwsi.exe')
                     byebye = True
                     break
-                for file in wsilist:
-                    wsitype = os.path.splitext(file)[1].lower()[1:]
+                filecopied = [False for _ in range(howmany)]
+                for ii in range(howmany):
+                    wfile = wsilist[ii]
+                    wsitype = os.path.splitext(wfile)[1].lower()[1:]
                     try:
                         #shutil.copy(file, decartWatch)
                         if wsitype == 'mrxs':
-                            dirmrxs = os.path.splitext(file)[0]
+                            dirmrxs = os.path.splitext(wfile)[0]
                             shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
-                        if checkCopyWSIcompleted(file, os.path.join(decartWatch, os.path.basename(file))):
+                        if checkCopyWSIcompleted(wfile, os.path.join(decartWatch, os.path.basename(wfile))):
                             if anchortime:
                                 dt_anchor = datetime.now()-timedelta(seconds=0.5)      ## for check decart log
                                 anchortime = False
-                            logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
-                            bWSIfound = True
+                            logger.trace(f"Copied: {os.path.basename(wfile)} → {decartWatch}")
+                            filecopied[ii] = True
                         else:
-                            wsilist.remove(file)
+                            #wsilist.remove(file)
+                            logger.debug(f'{os.path.basename(wfile)} was moved!')
                     except Exception as e:
                         logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
-                howmany = len(wsilist)
+                howmany = sum(filecopied)
+                bWSIfound = True if howmany else False
                 logger.debug(f'{howmany} WSI files were copied to DeCart watch folder')
             if bWSIfound:
                 logger.debug(f'start tracing decart.log from {dt_anchor} ...')
-                wsicompleted = [False for _ in range(howmany)]
+                wsicompleted = []
+                for ii in range(len(filecopied)):
+                    if filecopied[ii]:
+                        wsicompleted.append(False)
+                    else:
+                        wsilist.remove(wsilist[ii])
+                logger.debug(f'waiting for {len(wsicompleted)}:({len(wsilist)}) wsi files ....')
                 isModel2025 = False if 'ProgramData' in configYAML else True
                 errorfound = checkDeCartCompletion(wsilist, decartWatch, wsicompleted, isModel2025, dt_anchor)
                 ## copy .med/.aix to local backup folder
@@ -605,28 +640,38 @@ def startMonitorFolders(configfile, logfile):
                     print('[ERROR] STOP watchwsi.exe')
                     byebye = True
                     break
-                for file in wsilist:
-                    wsitype = os.path.splitext(file)[1].lower()[1:]
+                filecopied = [False for _ in range(howmany)]
+                for ii in range(howmany):
+                    wfile = wsilist[ii]
+                    wsitype = os.path.splitext(wfile)[1].lower()[1:]
                     try:
                         #shutil.copy(file, decartWatch)
                         if wsitype == 'mrxs':
-                            dirmrxs = os.path.splitext(file)[0]
+                            dirmrxs = os.path.splitext(wfile)[0]
                             shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
-                        if checkCopyWSIcompleted(file, os.path.join(decartWatch, os.path.basename(file))):
+                        if checkCopyWSIcompleted(wfile, os.path.join(decartWatch, os.path.basename(wfile))):
                             if anchortime:
                                 dt_anchor = datetime.now()-timedelta(seconds=0.5)      ## for check decart log
                                 anchortime = False
-                            logger.trace(f"Copied: {os.path.basename(file)} → {decartWatch}")
-                            bWSIfound = True
+                            logger.trace(f"Copied: {os.path.basename(wfile)} → {decartWatch}")
+                            filecopied[ii] = True
                         else:
-                            wsilist.remove(file)
+                            #wsilist.remove(file)
+                            logger.debug(f'{os.path.basename(wfile)} was moved!')
                     except Exception as e:
                         logger.trace(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
-                howmany = len(wsilist)
+                howmany = sum(filecopied)
+                bWSIfound = True if howmany else False
                 logger.debug(f'{howmany} WSI files were copied to DeCart watch folder')
             if bWSIfound:
                 logger.debug(f'start tracing decart.log from {dt_anchor} ...')
-                wsicompleted = [False for _ in range(howmany)]
+                wsicompleted = []
+                for ii in range(len(filecopied)):
+                    if filecopied[ii]:
+                        wsicompleted.append(False)
+                    else:
+                        wsilist.remove(wsilist[ii])
+                logger.debug(f'waiting for {len(wsicompleted)}:({len(wsilist)}) wsi files ....')
                 isModel2025 = False if 'ProgramData' in configYAML else True
                 errorfound = checkDeCartCompletion(wsilist, decartWatch, wsicompleted, isModel2025, dt_anchor)
                 ## copy .med/.aix to local backup folder
