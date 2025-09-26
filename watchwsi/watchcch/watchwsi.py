@@ -224,8 +224,16 @@ def backupAnalyzedImageFiles(srcpath, dstpath, wsilist, wsicompleted, modelname,
         return
     #mlist = glob.glob(os.path.join(srcpath, '*.med'))
     backup_medaix = os.path.join(dstpath, modelname.lower())
+    mkdirFAILED = False
     if os.path.isdir(backup_medaix) == False:
-        os.mkdir(backup_medaix)
+        try:
+            os.mkdir(backup_medaix)
+        except OSError as e:
+            logger.error(f"[backupAnalyzedImageFiles] An error occurred: {e}")
+            mkdirFAILED = True
+    if mkdirFAILED:
+        logger.error(f'mkdir({backup_medaix}) failed, can not backup .med/.aix files')
+        return
     for ii in range(len(wsicompleted)):
     ##for wsi in wsilist:
         if wsicompleted[ii] == False:
@@ -307,6 +315,8 @@ def checkDeCartCompletion(wsilist, watchfolder, wsicompleted, model2025, dt_anch
                     if thisaix.exists():
                         logger.info(f'{str(thisaix)} inference completed')
                         wsicompleted[i] = True
+                    else:
+                        logger.debug(f'still waiting {str(thisaix)}')
             ## check consumed time
             consumedtime = time.perf_counter()-t0
             if consumedtime > expectedInferenceTime:
@@ -419,9 +429,9 @@ def startMonitorFolders(configfile, logfile):
     logger.trace(f"👀 Monitoring scanner folders", 'startMonitorFolders')
     configYAML = args['decartyaml']
     byebye = False
-    logger.trace(f'watching urine WSI folder {scannerURO}...')
     while True:
         ## forever watch loop for urine slide till new thyroid WSI found
+        logger.trace(f'watching urine WSI folder {scannerURO}...')
         while True:
             if os.path.exists(scannerURO) == False:
                 logger.warning(f'lost connection to {scannerURO}, try re-connecting ...')
@@ -434,6 +444,7 @@ def startMonitorFolders(configfile, logfile):
             bWSIfound = False
             # monitor aixuro folder in scanner
             flist = glob.glob(os.path.join(scannerURO, '*'))
+            flist.sort()
             wsilist = []
             for file in flist:
                 wsitype = os.path.splitext(file)[1].lower()[1:]
@@ -490,104 +501,118 @@ def startMonitorFolders(configfile, logfile):
                 backupURO = os.path.join(folderWSIbackup, 'aixuro')
                 if os.path.exists(backupURO) == False:
                     os.makedirs(backupURO)
+                ## check destination folder (network) still connected
+                ##if os.path.exists(dstMEDAIX):
+                mkdirFAILED = False
                 dstURO = os.path.join(dstMEDAIX, 'aixuro')
                 if os.path.exists(dstURO) == False:
-                    os.makedirs(dstURO)
-                if errorfound:      ## partial wsi files were completed
-                    logger.debug(f'result of model inference: {wsicompleted}')
-                    failed_wsi = os.path.join(backupURO, 'failedWSI')
-                    if os.path.exists(failed_wsi) == False:
-                        os.makedirs(failed_wsi)
-                    for i, file in enumerate(wsilist):
-                        wfile = os.path.basename(file)
-                        mfile = f'{os.path.splitext(wfile)[0]}.med'
-                        afile = f'{os.path.splitext(wfile)[0]}.aix'
-                        if wsicompleted[i]:
-                            ## copy .med/.aix to local folder for backup
+                    try:
+                        os.makedirs(dstURO)
+                    except OSError as e:
+                        logger.error(f'failed to create {dstURO}: {e}')
+                        mkdirFAILED = True
+                if not mkdirFAILED:
+                    if errorfound:      ## partial wsi files were completed
+                        logger.debug(f'result of model inference: {wsicompleted}')
+                        failed_wsi = os.path.join(backupURO, 'failedWSI')
+                        if os.path.exists(failed_wsi) == False:
+                            os.makedirs(failed_wsi)
+                        for i, file in enumerate(wsilist):
+                            wfile = os.path.basename(file)
+                            mfile = f'{os.path.splitext(wfile)[0]}.med'
+                            afile = f'{os.path.splitext(wfile)[0]}.aix'
+                            if wsicompleted[i]:
+                                ## copy .med/.aix to local folder for backup
+                                try:
+                                    shutil.copy(os.path.join(srcMEDAIX, mfile), os.path.join(backupURO, mfile))
+                                    shutil.copy(os.path.join(srcMEDAIX, afile), os.path.join(backupURO, afile))
+                                except PermissionError:
+                                    logger.error(f'insufficient permission to copy the file')
+                                except OSError as e:
+                                    logger.error(f'OS error occurred: {e}')
+                                ## move .med/.aix to image storage
+                                try:
+                                    shutil.move(os.path.join(srcMEDAIX, mfile), os.path.join(dstURO, mfile))
+                                    shutil.move(os.path.join(srcMEDAIX, afile), os.path.join(dstURO, afile))
+                                except PermissionError:
+                                    logger.error(f'permission denied while accessing the moving files')
+                                except shutil.Error as e:
+                                    logger.error(f'an error occurred: {e}')
+                                except Exception as e:
+                                    logger.error(f'failed to move analyzed images: {e}')
+                                ## local wsi backup folder
+                                localwsibackup = os.path.join(folderWSIbackup, 'aixuro')
+                            else:       ## decart failed to model inference this file
+                                localwsibackup = os.path.join(folderWSIbackup, 'aixuro', 'failedWSI')
+                                ## delete failed WSI from decart watch folder
+                                failedwsi = os.path.join(decartWatch, wfile)
+                                try:
+                                    os.unlink(failedwsi)
+                                    logger.trace(f'os.unlink({failedwsi})')
+                                except FileNotFoundError:
+                                    logger.error(f'{failedwsi} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {failedwsi}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {failedwsi}: {e}')                           
+                            ## move wsi files to local backup folder, for now
                             try:
-                                shutil.copy(os.path.join(srcMEDAIX, mfile), os.path.join(backupURO, mfile))
-                                shutil.copy(os.path.join(srcMEDAIX, afile), os.path.join(backupURO, afile))
+                                shutil.move(file, os.path.join(localwsibackup, wfile))
+                                logger.trace(f'move {file} to {os.path.join(localwsibackup, wfile)}')
                             except PermissionError:
-                                logger.error(f'insufficient permission to copy the file')
+                                logger.error(f'Permission denied when moving {file}')
                             except OSError as e:
-                                logger.error(f'OS error occurred: {e}')
-                            ## move .med/.aix to image storage
-                            try:
-                                shutil.move(os.path.join(srcMEDAIX, mfile), os.path.join(dstURO, mfile))
-                                shutil.move(os.path.join(srcMEDAIX, afile), os.path.join(dstURO, afile))
-                            except PermissionError:
-                                logger.error(f'permission denied while accessing the moving files')
-                            except shutil.Error as e:
-                                logger.error(f'an error occurred: {e}')
-                            except Exception as e:
-                                logger.error(f'failed to move analyzed images: {e}')
-                            ## local wsi backup folder
-                            localwsibackup = os.path.join(folderWSIbackup, 'aixuro')
-                        else:       ## decart failed to model inference this file
-                            localwsibackup = os.path.join(folderWSIbackup, 'aixuro', 'failedWSI')
-                            ## delete failed WSI from decart watch folder
-                            failedwsi = os.path.join(decartWatch, wfile)
-                            try:
-                                os.unlink(failedwsi)
-                                logger.trace(f'os.unlink({failedwsi})')
-                            except FileNotFoundError:
-                                logger.error(f'{failedwsi} does not exist')
-                            except PermissionError:
-                                logger.error(f'permission denied: unable to delete {failedwsi}')
-                            except OSError as e:
-                                logger.error(f'error occurred while deleting {failedwsi}: {e}')                           
+                                logger.error(f'Error occurred while moving file: {e}')
+                            ## delete if still exist
+                            if os.path.exists(file):
+                                try:
+                                    os.unlink(file)
+                                    logger.trace(f'os.unink({file})')
+                                except FileNotFoundError:
+                                    logger.error(f'{file} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {file}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {file}: {e}')                           
+                            ## I don't know why??
+                            if os.path.exists(file):
+                                logger.error(f'[FATAL] why {file} still existed !!????')
+                                newfile = f'{file}.err'
+                                try:
+                                    os.rename(file, newfile)
+                                except FileExistsError:
+                                    logger.error("The new file name already exists.")
+                                except OSError as e:
+                                    logger.error(f"Error: {e}")
+                    else:   ## all wsi files were analyzed completed
+                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, wsilist, wsicompleted, 'AIxURO', 'copy')
+                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, wsilist, wsicompleted, 'AIxURO', 'move')
                         ## move wsi files to local backup folder, for now
-                        try:
-                            shutil.move(file, os.path.join(localwsibackup, wfile))
-                            logger.trace(f'move {file} to {os.path.join(localwsibackup, wfile)}')
-                        except PermissionError:
-                            logger.error(f'Permission denied when moving {file}')
-                        except OSError as e:
-                            logger.error(f'Error occurred while moving file: {e}')
-                        ## delete if still exist
-                        if os.path.exists(file):
+                        for file in wsilist:
                             try:
-                                os.unlink(file)
-                                logger.trace(f'os.unink({file})')
-                            except FileNotFoundError:
-                                logger.error(f'{file} does not exist')
+                                shutil.move(file, os.path.join(backupURO, os.path.basename(file)))
                             except PermissionError:
-                                logger.error(f'permission denied: unable to delete {file}')
+                                logger.error(f'Permission denied when moving {file}')
                             except OSError as e:
-                                logger.error(f'error occurred while deleting {file}: {e}')                           
-                        ## I don't know why??
-                        if os.path.exists(file):
-                            logger.error(f'[FATAL] why {file} still existed !!????')
-                            newfile = f'{file}.err'
-                            try:
-                                os.rename(file, newfile)
-                            except FileExistsError:
-                                logger.error("The new file name already exists.")
-                            except OSError as e:
-                                logger.error(f"Error: {e}")
-                else:   ## all wsi files were analyzed completed
-                    backupAnalyzedImageFiles(srcMEDAIX, folderBackup, flist, wsicompleted, 'AIxURO', 'copy')
-                    backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, flist, wsicompleted, 'AIxURO', 'move')
-                    ## move wsi files to local backup folder, for now
-                    for file in flist:
-                        try:
-                            shutil.move(file, os.path.join(backupURO, os.path.basename(file)))
-                        except PermissionError:
-                            logger.error(f'Permission denied when moving {file}')
-                        except OSError as e:
-                            logger.error(f'Error occurred while moving file: {e}')
-                        ## delete if still exist
-                        if os.path.exists(file):
-                            try:
-                                os.remove(file)
-                            except FileNotFoundError:
-                                logger.error(f'{file} does not exist')
-                            except PermissionError:
-                                logger.error(f'permission denied: unable to delete {file}')
-                            except OSError as e:
-                                logger.error(f'error occurred while deleting {file}: {e}')
-                consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
-                logger.info(f'processed {howmany} urine slides with {consumed_time[:-3]}')
+                                logger.error(f'Error occurred while moving file: {e}')
+                            finally:
+                                logger.debug(f'{file} was shutil.move to {backupURO}')
+                            ## delete if still exist
+                            if os.path.exists(file):
+                                try:
+                                    os.remove(file)
+                                except FileNotFoundError:
+                                    logger.error(f'{file} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {file}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {file}: {e}')
+                                finally:
+                                    logger.debug(f'{file} was os.remove to {backupURO}')
+                    consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+                    logger.info(f'processed {howmany} urine slides with {consumed_time[:-3]}')
+                else:
+                    logger.error(f'lost network connection, can not access {dstMEDAIX}')
             ## check decart DONE folder
             mlist = glob.glob(os.path.join(srcMEDAIX, 'done'))
             if len(mlist):
@@ -610,7 +635,7 @@ def startMonitorFolders(configfile, logfile):
             break
         #
         ## forever watch loop for urine slide till new thyroid WSI found
-        logger.trace('watching urine WSI folder {scannerTHY}...')
+        logger.trace('watching thyroid WSI folder {scannerTHY}...')
         while True:
             if os.path.exists(scannerTHY) == False:
                 logger.warning(f'lost connection to {scannerTHY}, try re-connecting ...')
@@ -623,6 +648,7 @@ def startMonitorFolders(configfile, logfile):
             # monitor aixthy folder in scanner
             bWSIfound = False
             flist = glob.glob(os.path.join(scannerTHY, '*'))
+            flist.sort()
             wsilist = []
             for file in flist:
                 if os.path.isfile(file) and wsitype in MONITORED_WSI:
@@ -659,7 +685,7 @@ def startMonitorFolders(configfile, logfile):
                             #wsilist.remove(file)
                             logger.debug(f'{os.path.basename(wfile)} was moved!')
                     except Exception as e:
-                        logger.trace(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
+                        logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
                 howmany = sum(filecopied)
                 bWSIfound = True if howmany else False
                 logger.debug(f'{howmany} WSI files were copied to DeCart watch folder')
@@ -678,104 +704,118 @@ def startMonitorFolders(configfile, logfile):
                 backupTHY = os.path.join(folderWSIbackup, 'aixthy')
                 if os.path.exists(backupTHY) == False:
                     os.makedirs(backupTHY)
+                ## check destination folder (network) still connected
+                ##if os.path.exists(dstMEDAIX):
+                mkdirFAILED = False
                 dstTHY = os.path.join(dstMEDAIX, 'aixthy')
                 if os.path.exists(dstTHY) == False:
-                    os.makedirs(dstTHY)
-                if errorfound:      ## not all wsi files were model inference completed
-                    logger.debug(f'result of model inference: {wsicompleted}')
-                    failed_wsi = os.path.join(backupTHY, 'failedWSI')
-                    if os.path.exists(failed_wsi) == False:
-                        os.makedirs(failed_wsi)
-                    for i, file in enumerate(wsilist):
-                        wfile = os.path.basename(file)
-                        mfile = f'{os.path.splitext(wfile)[0]}.med'
-                        afile = f'{os.path.splitext(wfile)[0]}.aix'
-                        if wsicompleted[i]:
-                            ## copy .med/.aix to local folder for backup
+                    try:
+                        os.makedirs(dstTHY)
+                    except OSError as e:
+                        logger.error(f'failed to create {dstTHY}: {e}')
+                        mkdirFAILED = True
+                if not mkdirFAILED:
+                    if errorfound:      ## not all wsi files were model inference completed
+                        logger.debug(f'result of model inference: {wsicompleted}')
+                        failed_wsi = os.path.join(backupTHY, 'failedWSI')
+                        if os.path.exists(failed_wsi) == False:
+                            os.makedirs(failed_wsi)
+                        for i, file in enumerate(wsilist):
+                            wfile = os.path.basename(file)
+                            mfile = f'{os.path.splitext(wfile)[0]}.med'
+                            afile = f'{os.path.splitext(wfile)[0]}.aix'
+                            if wsicompleted[i]:
+                                ## copy .med/.aix to local folder for backup
+                                try:
+                                    shutil.copy(os.path.join(srcMEDAIX, mfile), os.path.join(backupTHY, mfile))
+                                    shutil.copy(os.path.join(srcMEDAIX, afile), os.path.join(backupTHY, afile))
+                                except PermissionError:
+                                    logger.error(f'insufficient permission to copy the file')
+                                except OSError as e:
+                                    logger.error(f'OS error occurred: {e}')
+                                ## move .med/.aix to image storage
+                                try:
+                                    shutil.move(os.path.join(srcMEDAIX, mfile), os.path.join(dstTHY, mfile))
+                                    shutil.move(os.path.join(srcMEDAIX, afile), os.path.join(dstTHY, afile))
+                                except PermissionError:
+                                    logger.error(f'permission denied while accessing the moving files')
+                                except shutil.Error as e:
+                                    logger.error(f'an error occurred: {e}')
+                                except Exception as e:
+                                    logger.error(f'failed to move analyzed images: {e}')
+                                ## local wsi backup folder
+                                localwsibackup = os.path.join(folderWSIbackup, 'aixthy')
+                            else:       ## decart failed to model inference this file
+                                localwsibackup = os.path.join(folderWSIbackup, 'aixthy', 'failedWSI')
+                                ## delete failed WSI from decart watch folder
+                                failedwsi = os.path.join(decartWatch, wfile)
+                                try:
+                                    os.unlink(failedwsi)
+                                    logger.trace(f'os.unlink({failedwsi})')
+                                except FileNotFoundError:
+                                    logger.error(f'{failedwsi} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {failedwsi}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {failedwsi}: {e}')                           
+                            ## move wsi files to local backup folder, for now
                             try:
-                                shutil.copy(os.path.join(srcMEDAIX, mfile), os.path.join(backupTHY, mfile))
-                                shutil.copy(os.path.join(srcMEDAIX, afile), os.path.join(backupTHY, afile))
+                                shutil.move(file, os.path.join(localwsibackup, wfile))
+                                logger.trace(f'move {file} to {os.path.join(localwsibackup, wfile)}')
                             except PermissionError:
-                                logger.error(f'insufficient permission to copy the file')
+                                logger.error(f'Permission denied when moving {file}')
                             except OSError as e:
-                                logger.error(f'OS error occurred: {e}')
-                            ## move .med/.aix to image storage
-                            try:
-                                shutil.move(os.path.join(srcMEDAIX, mfile), os.path.join(dstTHY, mfile))
-                                shutil.move(os.path.join(srcMEDAIX, afile), os.path.join(dstTHY, afile))
-                            except PermissionError:
-                                logger.error(f'permission denied while accessing the moving files')
-                            except shutil.Error as e:
-                                logger.error(f'an error occurred: {e}')
-                            except Exception as e:
-                                logger.error(f'failed to move analyzed images: {e}')
-                            ## local wsi backup folder
-                            localwsibackup = os.path.join(folderWSIbackup, 'aixthy')
-                        else:       ## decart failed to model inference this file
-                            localwsibackup = os.path.join(folderWSIbackup, 'aixthy', 'failedWSI')
-                            ## delete failed WSI from decart watch folder
-                            failedwsi = os.path.join(decartWatch, wfile)
-                            try:
-                                os.unlink(failedwsi)
-                                logger.trace(f'os.unlink({failedwsi})')
-                            except FileNotFoundError:
-                                logger.error(f'{failedwsi} does not exist')
-                            except PermissionError:
-                                logger.error(f'permission denied: unable to delete {failedwsi}')
-                            except OSError as e:
-                                logger.error(f'error occurred while deleting {failedwsi}: {e}')                           
+                                logger.error(f'Error occurred while moving file: {e}')
+                            ## delete if still exist
+                            if os.path.exists(file):
+                                try:
+                                    os.unlink(file)
+                                    logger.trace(f'os.unlink({file})')
+                                except FileNotFoundError:
+                                    logger.error(f'{file} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {file}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {file}: {e}')                           
+                            ## I don't know why??
+                            if os.path.exists(file):
+                                logger.error(f'[FATAL] why {file} still existed !!????')
+                                delcmd = f'del {file}'
+                                try:
+                                    os.system(delcmd)
+                                except Exception as e:
+                                    logger.error(f"Unexpected error while deleting failed {file}: {e}")
+                    else:
+                        ## copy .med/.aix to local backup folder
+                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, wsilist, wsicompleted, 'AIxTHY', 'copy')
+                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, wsilist, wsicompleted, 'AIxTHY', 'move')
                         ## move wsi files to local backup folder, for now
-                        try:
-                            shutil.move(file, os.path.join(localwsibackup, wfile))
-                            logger.trace(f'move {file} to {os.path.join(localwsibackup, wfile)}')
-                        except PermissionError:
-                            logger.error(f'Permission denied when moving {file}')
-                        except OSError as e:
-                            logger.error(f'Error occurred while moving file: {e}')
-                        ## delete if still exist
-                        if os.path.exists(file):
+                        for file in wsilist:
                             try:
-                                os.unlink(file)
-                                logger.trace(f'os.unlink({file})')
-                            except FileNotFoundError:
-                                logger.error(f'{file} does not exist')
+                                #os.rename(file, os.path.join(backupTHY, os.path.basename(file)))
+                                shutil.move(file, os.path.join(backupTHY, os.path.basename(file)))
                             except PermissionError:
-                                logger.error(f'permission denied: unable to delete {file}')
+                                logger.error(f'Permission denied when moving {file}')
                             except OSError as e:
-                                logger.error(f'error occurred while deleting {file}: {e}')                           
-                        ## I don't know why??
-                        if os.path.exists(file):
-                            logger.error(f'[FATAL] why {file} still existed !!????')
-                            delcmd = f'del {file}'
-                            try:
-                                os.system(delcmd)
-                            except Exception as e:
-                                logger.error(f"Unexpected error while deleting failed {file}: {e}")
+                                logger.error(f'Error occurred while moving file: {e}')
+                            finally:
+                                logger.debug(f'{file} was shutil.move to {backupTHY}')
+                            ## delete if still exist
+                            if os.path.exists(file):
+                                try:
+                                    os.remove(file)
+                                except FileNotFoundError:
+                                    logger.error(f'{file} does not exist')
+                                except PermissionError:
+                                    logger.error(f'permission denied: unable to delete {file}')
+                                except OSError as e:
+                                    logger.error(f'error occurred while deleting {file}: {e}')
+                                finally:
+                                    logger.debug(f'{file} was os.remove to {backupTHY}')
+                    consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+                    logger.info(f'processed {howmany} thyroid slides with {consumed_time[:-3]}')
                 else:
-                    ## copy .med/.aix to local backup folder
-                    backupAnalyzedImageFiles(srcMEDAIX, folderBackup, flist, wsicompleted, 'AIxTHY', 'copy')
-                    backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, flist, wsicompleted, 'AIxTHY', 'move')
-                    ## move wsi files to local backup folder, for now
-                    for file in flist:
-                        try:
-                            #os.rename(file, os.path.join(backupTHY, os.path.basename(file)))
-                            shutil.move(file, os.path.join(backupTHY, os.path.basename(file)))
-                        except PermissionError:
-                            logger.error(f'Permission denied when moving {file}')
-                        except OSError as e:
-                            logger.error(f'Error occurred while moving file: {e}')
-                        ## delete if still exist
-                        if os.path.exists(file):
-                            try:
-                                os.remove(file)
-                            except FileNotFoundError:
-                                logger.error(f'{file} does not exist')
-                            except PermissionError:
-                                logger.error(f'permission denied: unable to delete {file}')
-                            except OSError as e:
-                                logger.error(f'error occurred while deleting {file}: {e}')
-                consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
-                logger.info(f'processed {howmany} thyroid slides with {consumed_time[:-3]}')
+                    logger.error(f'lost network connection, can not access {dstMEDAIX}')
             ## check decart DONE folder
             mlist = glob.glob(os.path.join(srcMEDAIX, 'done'))
             if len(mlist):
