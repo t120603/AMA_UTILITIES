@@ -1,5 +1,5 @@
 # modelWSI module initialization
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 __author__ = "Philip Wu"
 
 from .modelWSI import cmdModelInference, getCellsInfoFromAIX

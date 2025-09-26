@@ -1,20 +1,29 @@
 ## ----- utility to retrieve metadata.json from .med
-import io
+import os, io
+import shutil
 import json
-import webp
+import time
+from datetime import timedelta
 import numpy as np
 import math
+from loguru import logger
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 from .asarlib import AsarFile
 from .amautility import replaceSpace2underscore
 
+## ---------- ---------- ---------- ----------
+## retrieve metadata.json from .med file
+## ---------- ---------- ---------- ----------
 def getMetadataFromMED(medfile):
     with AsarFile(medfile) as thismed:
         mdata = thismed.read_file('metadata.json')
     metajson = json.loads(mdata)
     return metajson
 
+## ---------- ---------- ---------- ----------
+## crop tile image from .med file
+## ---------- ---------- ---------- ----------
 def cropTileFromMLayerOfMED(medfname, whichz, x_topleft, y_topleft, fov_size_x, fov_size_y):
     ## read .med file using asarlib
     asar = AsarFile(medfname)
@@ -44,7 +53,35 @@ def cropTileFromMLayerOfMED(medfname, whichz, x_topleft, y_topleft, fov_size_x, 
     asar.close()
     return img
 
+## ---------- ---------- ---------- ----------
+## update metadata.json from multiple layers to single layer
+## ---------- ---------- ---------- ----------
+def updateMEDmetadata2singleLayer(medfile, dzipath):
+    medjson = getMetadataFromMED(medfile)
+    sizeZ = medjson.get('SizeZ', 1)
+    if sizeZ == 1:
+        logger.warning(f'{os.path.basename(medfile)} is already a single layer image')
+        return sizeZ, 0
+    bestZ = medjson.get('BestFocusLayer', -1)
+    if bestZ == -1:
+        logger.error(f'missing BestFocusLayer in metadata.json of {os.path.basename(medfile)}')
+        return sizeZ, 0
+    medjson.pop('BestFocusLayer')
+    levelcount = medjson.get('LevelCount', 0)
+    if levelcount > 0:
+        medjson['LevelCount'] = 0
+    medjson['IndexZ'] = [0]
+    medjson['SizeZ']  = 1
+    ## update metadata.json
+    metafile = os.path.join(dzipath, 'metadata.json')
+    with open(metafile, 'w', encoding='utf-8') as newmeta:
+        json.dump(medjson, newmeta)
+    logger.info(f'metadata.json for single layer was updated for {medfile}')
+    return sizeZ, bestZ
+
+## ---------- ---------- ---------- ----------
 ## extract specified layer from multiple layers of .med file (using asarlib)
+## ---------- ---------- ---------- ----------
 def extractOneLayerFromMED(medfname, binpath, whichlayer):
     ## parameters settings
     dzi_tmp = os.path.join(os.genenv('temp'), 'dzi')
@@ -107,3 +144,93 @@ def extractOneLayerFromMED(medfname, binpath, whichlayer):
     shutil.rmtree(dzi_tmp)
     return
 
+## ---------- ---------- ---------- ----------
+##  extract DZI data of specified layer from .med file
+## ---------- ---------- ---------- ----------
+def extractDZIdataFromMED(medfile, layer, dzipath):
+    with AsarFile(medfile) as thismed:
+        ## extract associated file
+        asslist = thismed.listdir()
+        dz_existed = False
+        for _, associate in enumerate(asslist):
+            if 'Z' not in associate and associate != 'metadata.json':
+                thismed.extract_file(associate, dzipath)
+            if f'Z{layer}.dz' == associate:
+                dz_existed = True
+        thismed.extract(f'Z{layer}_files', dzipath)
+        if dz_existed:
+            thismed.extract_file(f'Z{layer}.dz', dzipath)
+        thismed.extract_file(f'Z{layer}.dzi', dzipath)
+        os.rename(os.path.join(dzipath, f'Z{layer}_files'), os.path.join(dzipath, 'Z0_files'))
+        os.rename(os.path.join(dzipath, f'Z{layer}.dzi'), os.path.join(dzipath, 'Z0.dzi'))
+        if dz_existed:
+            os.rename(os.path.join(dzipath, f'Z{layer}.dz'), os.path.join(dzipath, 'Z0.dz'))
+
+## ---------- ---------- ---------- ----------
+##  extract every single layers from mutiple layers of .med file
+## ---------- ---------- ---------- ----------
+def extractSingleLayersFromMultiLayersMED(medfname, dstpath, binpath, whichlayers=None, modelname=None):
+    binasar = os.path.join(binpath, 'convert', 'rasar.exe')
+    multimed = replaceSpace2underscore(medfname)
+    dzipath = os.path.join(dstpath, 'dzi')
+    if os.path.isdir(dzipath) == False:
+        os.makedirs(dzipath)
+    logger.info(f'extract single layers from {os.path.basename(medfname)} to {dstpath}')
+    t0 = time.perf_counter()
+    TotalLayers, BestzLayer = updateMEDmetadata2singleLayer(multimed, dzipath)
+    medprefix = os.path.splitext(os.path.split(multimed)[1])[0]
+    ## identify which layers should be extracting
+    is_singleLayer = True
+    if whichlayers == []:
+        slayer = BestzLayer
+    else:
+        slayer = whichlayers[0]
+        if len(whichlayers) == 2:
+            elayer = whichlayers[1]
+            is_singleLayer = False
+    if is_singleLayer:
+        if slayer > TotalLayers:
+            slayer = BestzLayer
+        extractDZIdataFromMED(multimed, slayer, dzipath)
+        thismed = os.path.join(dstpath, f'{medprefix}_z{slayer:02}.med')
+        cmd_packmed = f'{binasar} pack {dzipath} {thismed}'
+        os.system(cmd_packmed)
+        logger.info(f'{os.path.basename(thismed)} is generated!')
+        # remove Z0_files, Z0.dzi, Z0.dz
+        if os.path.isdir(f'{dzipath}\\Z0_files'):
+            shutil.rmtree(f'{dzipath}\\Z0_files')
+        if os.path.isfile(f'{dzipath}\\Z0.dzi'):
+            os.remove(f'{dzipath}\\Z0.dzi')
+        if os.path.isfile(f'{dzipath}\\Z0.dz'):
+            os.remove(f'{dzipath}\\Z0.dz')
+    else:
+        if slayer > elayer:
+            slayer, elayer = elayer, slayer
+        if elayer >= TotalLayers:
+            elayer = TotalLayers-1
+        for lidx in range(slayer, elayer+1):
+            extractDZIdataFromMED(multimed, lidx, dzipath)
+            bz = f'_{lidx:02}_bestz_' if lidx == BestzLayer else '_'
+            thismed = os.path.join(dstpath, f'{medprefix}{bz}z{lidx:02}.med')
+            cmd_packmed = f'{binasar} pack {dzipath} {thismed}'
+            os.system(cmd_packmed)
+            logger.info(f'[{os.path.basename(thismed)} is generated!')
+            # remove Z0_files, Z0.dzi, Z0.dz
+            if os.path.isdir(f'{dzipath}\\Z0_files'):
+                shutil.rmtree(f'{dzipath}\\Z0_files')
+            if os.path.isfile(f'{dzipath}\\Z0.dzi'):
+                os.remove(f'{dzipath}\\Z0.dzi')
+            if os.path.isfile(f'{dzipath}\\Z0.dz'):
+                os.remove(f'{dzipath}\\Z0.dz')
+    ## remove dzi folder
+    shutil.rmtree(dzipath)
+    consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+    alllayers = f'z{slayer}' if is_singleLayer else f'z{slayer}-z{elayer}'
+    logger.info(f'took {consumed_time[:-3]} to extract {alllayers} single layers from {os.path.basename(medfname)}')
+    if modelname in ['AIxURO', 'AIxTHY']:
+        t0 = time.perf_counter()
+        updateDeCartConfig(modelname)
+        decart_version = args['decart_ver']
+        doModelInference(dstpath, modelname, decart_version, bmetadata=False)
+        tsstop = datetime.now().timestamp()
+        aux.printmsg(f'[INFO] took {aux.timestampDelta2String(tsstop-tsfrom)} to analyze all {TotalLayers} single layers from {os.path.basename(medfname)}')

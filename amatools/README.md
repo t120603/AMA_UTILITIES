@@ -31,8 +31,9 @@ ama-go -o analysis -f <path-to-aix>
 `-v` or `--decartversion`: decart version, e.g. 2.7.4
 
 ### Version
-| App Name | Version | Description |
+| Date | Version | Description |
 |----------|---------|-------------|
-| amatools | 0.0.4 | main features: model inference, parse metadata to database/csv |
+| 2025-09-26 | 0.0.5 | add function to extract single layer images from .med file |
+| 2025-09-25 | 0.0.4 | main features: model inference, parse metadata to database/csv |
 
 ### © 2025 AIxMed, Inc. All Rights Reserved

@@ -3,6 +3,7 @@
 ##   (2) configuration for working machine
 ## 
 import os, sys
+import json
 from loguru import logger
 import wmi, GPUtil, platform
 
