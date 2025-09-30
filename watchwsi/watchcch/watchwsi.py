@@ -266,6 +266,36 @@ def backupAnalyzedImageFiles(srcpath, dstpath, wsilist, wsicompleted, modelname,
     logger.info(f'{backuptype} {len(wsicompleted)} .med/.aix files to {dstpath} completed!')
 
 ##---------------------------------------------------------
+## check copy files completion
+##---------------------------------------------------------
+def verify_copy(srcpath, dstpath):
+    t0 = time.perf_counter()
+    while True:
+        src_files = set(os.path.relpath(os.path.join(root, file), srcpath) 
+                   for root, dirs, files in os.walk(srcpath) for file in files)
+        dst_files = set(os.path.relpath(os.path.join(root, file), dstpath) 
+                   for root, dirs, files in os.walk(dstpath) for file in files)
+    
+        if src_files != dst_files:
+            # number of files unmatched
+            time.sleep(10)
+            continue
+        # check filesize
+        copyCompleted = True
+        for rel_path in src_files:
+            src_file = os.path.join(srcpath, rel_path)
+            dst_file = os.path.join(dstpath, rel_path)
+            if os.path.getsize(src_file) != os.path.getsize(dst_file):
+                # filesize unmatch
+                copyCompleted = False
+                break
+        if copyCompleted:
+            break
+        else:
+            time.sleep(10)  ## wait for another 10 seconds
+    logger.trace(f'spent {time.perf_counter()-t0:,.3f} seconds to copy {srcpath} to {dstpath}')
+
+##---------------------------------------------------------
 ## check WSI file availability using openslide-python
 ##---------------------------------------------------------
 import openslide
@@ -463,7 +493,7 @@ def startMonitorFolders(configfile, logfile):
                     print('[ERROR] STOP watchwsi.exe')
                     byebye = True
                     break
-                filecopied = [False for _ in range(howmany)]
+                copiedwsi = []
                 for ii in range(howmany):
                     wfile = wsilist[ii]
                     wsitype = os.path.splitext(wfile)[1].lower()[1:]
@@ -471,32 +501,29 @@ def startMonitorFolders(configfile, logfile):
                         #shutil.copy(file, decartWatch)
                         if wsitype == 'mrxs':
                             dirmrxs = os.path.splitext(wfile)[0]
-                            shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
+                            dstmrxs = os.path.join(decartWatch, os.path.split(dirmrxs)[1])
+                            shutil.copytree(dirmrxs, dstmrxs)
+                            verify_copy(dirmrxs, dstmrxs)
                         if checkCopyWSIcompleted(wfile, os.path.join(decartWatch, os.path.basename(wfile))):
                             if anchortime:
                                 dt_anchor = datetime.now()-timedelta(seconds=0.5)      ## for check decart log
                                 anchortime = False
                             logger.trace(f"Copied: {os.path.basename(wfile)} → {decartWatch}")
-                            filecopied[ii] = True
+                            copiedwsi.append(wfile)
                         else:
                             #wsilist.remove(file)
-                            logger.debug(f'{os.path.basename(wfile)} was moved!')
+                            logger.debug(f'{os.path.basename(wfile)} was moved from copied list!')
                     except Exception as e:
                         logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
-                howmany = sum(filecopied)
+                howmany = len(copiedwsi)
                 bWSIfound = True if howmany else False
                 logger.debug(f'{howmany} WSI files were copied to DeCart watch folder')
             if bWSIfound:
                 logger.debug(f'start tracing decart.log from {dt_anchor} ...')
-                wsicompleted = []
-                for ii in range(len(filecopied)):
-                    if filecopied[ii]:
-                        wsicompleted.append(False)
-                    else:
-                        wsilist.remove(wsilist[ii])
-                logger.debug(f'waiting for {len(wsicompleted)}:({len(wsilist)}) wsi files ....')
+                wsicompleted = [False for _ in range(howmany)]
+                logger.debug(f'tracing {len(wsicompleted)} (of {len(wsilist)}) wsi files ....')
                 isModel2025 = False if 'ProgramData' in configYAML else True
-                errorfound = checkDeCartCompletion(wsilist, decartWatch, wsicompleted, isModel2025, dt_anchor)
+                errorfound = checkDeCartCompletion(copiedwsi, decartWatch, wsicompleted, isModel2025, dt_anchor)
                 ## copy .med/.aix to local backup folder
                 backupURO = os.path.join(folderWSIbackup, 'aixuro')
                 if os.path.exists(backupURO) == False:
@@ -517,7 +544,7 @@ def startMonitorFolders(configfile, logfile):
                         failed_wsi = os.path.join(backupURO, 'failedWSI')
                         if os.path.exists(failed_wsi) == False:
                             os.makedirs(failed_wsi)
-                        for i, file in enumerate(wsilist):
+                        for i, file in enumerate(copiedwsi):
                             wfile = os.path.basename(file)
                             mfile = f'{os.path.splitext(wfile)[0]}.med'
                             afile = f'{os.path.splitext(wfile)[0]}.aix'
@@ -585,10 +612,10 @@ def startMonitorFolders(configfile, logfile):
                                 except OSError as e:
                                     logger.error(f"Error: {e}")
                     else:   ## all wsi files were analyzed completed
-                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, wsilist, wsicompleted, 'AIxURO', 'copy')
-                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, wsilist, wsicompleted, 'AIxURO', 'move')
+                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, copiedwsi, wsicompleted, 'AIxURO', 'copy')
+                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, copiedwsi, wsicompleted, 'AIxURO', 'move')
                         ## move wsi files to local backup folder, for now
-                        for file in wsilist:
+                        for file in copiedwsi:
                             try:
                                 shutil.move(file, os.path.join(backupURO, os.path.basename(file)))
                             except PermissionError:
@@ -666,7 +693,7 @@ def startMonitorFolders(configfile, logfile):
                     print('[ERROR] STOP watchwsi.exe')
                     byebye = True
                     break
-                filecopied = [False for _ in range(howmany)]
+                copiedwsi = []
                 for ii in range(howmany):
                     wfile = wsilist[ii]
                     wsitype = os.path.splitext(wfile)[1].lower()[1:]
@@ -674,32 +701,29 @@ def startMonitorFolders(configfile, logfile):
                         #shutil.copy(file, decartWatch)
                         if wsitype == 'mrxs':
                             dirmrxs = os.path.splitext(wfile)[0]
-                            shutil.copytree(dirmrxs, os.path.join(decartWatch, os.path.split(dirmrxs)[1]))
+                            dstmrxs = os.path.join(decartWatch, os.path.split(dirmrxs)[1])
+                            shutil.copytree(dirmrxs, dstmrxs)
+                            verify_copy(dirmrxs, dstmrxs)
                         if checkCopyWSIcompleted(wfile, os.path.join(decartWatch, os.path.basename(wfile))):
                             if anchortime:
                                 dt_anchor = datetime.now()-timedelta(seconds=0.5)      ## for check decart log
                                 anchortime = False
                             logger.trace(f"Copied: {os.path.basename(wfile)} → {decartWatch}")
-                            filecopied[ii] = True
+                            copiedwsi.append(wfile)
                         else:
                             #wsilist.remove(file)
-                            logger.debug(f'{os.path.basename(wfile)} was moved!')
+                            logger.debug(f'{os.path.basename(wfile)} was moved from copied list!')
                     except Exception as e:
                         logger.error(f"Copy failed: {os.path.basename(file)} → {decartWatch} | Error: {str(e)}")
-                howmany = sum(filecopied)
+                howmany = len(copiedwsi)
                 bWSIfound = True if howmany else False
                 logger.debug(f'{howmany} WSI files were copied to DeCart watch folder')
             if bWSIfound:
                 logger.debug(f'start tracing decart.log from {dt_anchor} ...')
-                wsicompleted = []
-                for ii in range(len(filecopied)):
-                    if filecopied[ii]:
-                        wsicompleted.append(False)
-                    else:
-                        wsilist.remove(wsilist[ii])
-                logger.debug(f'waiting for {len(wsicompleted)}:({len(wsilist)}) wsi files ....')
+                wsicompleted = [False for _ in range(howmany)]
+                logger.debug(f'tracing {len(wsicompleted)} (of {len(wsilist)}) wsi files ....')
                 isModel2025 = False if 'ProgramData' in configYAML else True
-                errorfound = checkDeCartCompletion(wsilist, decartWatch, wsicompleted, isModel2025, dt_anchor)
+                errorfound = checkDeCartCompletion(copiedwsi, decartWatch, wsicompleted, isModel2025, dt_anchor)
                 ## copy .med/.aix to local backup folder
                 backupTHY = os.path.join(folderWSIbackup, 'aixthy')
                 if os.path.exists(backupTHY) == False:
@@ -720,7 +744,7 @@ def startMonitorFolders(configfile, logfile):
                         failed_wsi = os.path.join(backupTHY, 'failedWSI')
                         if os.path.exists(failed_wsi) == False:
                             os.makedirs(failed_wsi)
-                        for i, file in enumerate(wsilist):
+                        for i, file in enumerate(copiedwsi):
                             wfile = os.path.basename(file)
                             mfile = f'{os.path.splitext(wfile)[0]}.med'
                             afile = f'{os.path.splitext(wfile)[0]}.aix'
@@ -787,10 +811,10 @@ def startMonitorFolders(configfile, logfile):
                                     logger.error(f"Unexpected error while deleting failed {file}: {e}")
                     else:
                         ## copy .med/.aix to local backup folder
-                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, wsilist, wsicompleted, 'AIxTHY', 'copy')
-                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, wsilist, wsicompleted, 'AIxTHY', 'move')
+                        backupAnalyzedImageFiles(srcMEDAIX, folderBackup, copiedwsi, wsicompleted, 'AIxTHY', 'copy')
+                        backupAnalyzedImageFiles(srcMEDAIX, dstMEDAIX, copiedwsi, wsicompleted, 'AIxTHY', 'move')
                         ## move wsi files to local backup folder, for now
-                        for file in wsilist:
+                        for file in copiedwsi:
                             try:
                                 #os.rename(file, os.path.join(backupTHY, os.path.basename(file)))
                                 shutil.move(file, os.path.join(backupTHY, os.path.basename(file)))
