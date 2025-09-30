@@ -9,12 +9,17 @@ import math
 from loguru import logger
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
+import qrcode
 from .asarlib import AsarFile
-from .amautility import replaceSpace2underscore
+from .amautility import replaceSpace2underscore, updateDeCartConfig
 
 ## ---------- ---------- ---------- ----------
-## retrieve metadata.json from .med file
+## utility (using asarlib) to 
+##  -- retrieve metadata.json from .med file
+##  -- crop tile image from specified layer of .med file
+##  -- replace label.jpg with barcode image wsi filename
 ## ---------- ---------- ---------- ----------
+## retrieve metadata.json from .med file
 def getMetadataFromMED(medfile):
     with AsarFile(medfile) as thismed:
         mdata = thismed.read_file('metadata.json')
@@ -52,6 +57,34 @@ def cropTileFromMLayerOfMED(medfname, whichz, x_topleft, y_topleft, fov_size_x, 
     ##
     asar.close()
     return img
+
+## ---------- ---------- ---------- ----------
+## replace label image with a QR code image
+## ---------- ---------- ---------- ----------
+def replaceLabelImageWithQRCode(medfname, bin_rasar):
+    mpath, mfile = os.path.split(medfname)
+    medprefixname = os.path.splitext(mfile)[0]
+    dzipath = os.path.join(mpath, 'dzi')
+    if not os.path.exists(dzipath):
+        os.makedirs(dzipath)
+    ## create QR code image
+    qrlabel = qrcode.make(medprefixname)
+    qrlabel.save(os.path.join(dzipath, 'label.jpg'))
+    ## extract all other files from.med file
+    with AsarFile(medfname) as unpackmed:
+        dirwalk = unpackmed.listdir()
+        for i, ass in enumerate(dirwalk):
+            if '_files' in ass:
+                unpackmed.extract(ass, dzipath)
+            elif ass != 'label.jpg':
+                unpackmed.extract_file(ass, dzipath)
+    ## pack .med file
+    medfile = f'{mpath}\\{medprefixname}-qrlabel.med'
+    packMED = f'{bin_rasar} pack {dzipath} {medfile}'
+    os.system(packMED)
+    logger.info(f'{os.path.basename(medfile)} completed! removing temporary dzi folder...')
+    shutil.rmtree(dzipath)
+    return
 
 ## ---------- ---------- ---------- ----------
 ## update metadata.json from multiple layers to single layer
@@ -192,7 +225,7 @@ def extractSingleLayersFromMultiLayersMED(medfname, dstpath, binpath, whichlayer
         if slayer > TotalLayers:
             slayer = BestzLayer
         extractDZIdataFromMED(multimed, slayer, dzipath)
-        thismed = os.path.join(dstpath, f'{medprefix}_z{slayer:02}.med')
+        thismed = os.path.join(dstpath, f'{medprefix}_z{BestzLayer:02}.med')
         cmd_packmed = f'{binasar} pack {dzipath} {thismed}'
         os.system(cmd_packmed)
         logger.info(f'{os.path.basename(thismed)} is generated!')
@@ -210,11 +243,11 @@ def extractSingleLayersFromMultiLayersMED(medfname, dstpath, binpath, whichlayer
             elayer = TotalLayers-1
         for lidx in range(slayer, elayer+1):
             extractDZIdataFromMED(multimed, lidx, dzipath)
-            bz = f'_{lidx:02}_bestz_' if lidx == BestzLayer else '_'
+            bz = f'_z{lidx:02}_bestz_' if lidx == BestzLayer else '_'
             thismed = os.path.join(dstpath, f'{medprefix}{bz}z{lidx:02}.med')
             cmd_packmed = f'{binasar} pack {dzipath} {thismed}'
             os.system(cmd_packmed)
-            logger.info(f'[{os.path.basename(thismed)} is generated!')
+            logger.info(f'{os.path.basename(thismed)} is generated!')
             # remove Z0_files, Z0.dzi, Z0.dz
             if os.path.isdir(f'{dzipath}\\Z0_files'):
                 shutil.rmtree(f'{dzipath}\\Z0_files')
@@ -229,8 +262,12 @@ def extractSingleLayersFromMultiLayersMED(medfname, dstpath, binpath, whichlayer
     logger.info(f'took {consumed_time[:-3]} to extract {alllayers} single layers from {os.path.basename(medfname)}')
     if modelname in ['AIxURO', 'AIxTHY']:
         t0 = time.perf_counter()
-        updateDeCartConfig(modelname)
-        decart_version = args['decart_ver']
-        doModelInference(dstpath, modelname, decart_version, bmetadata=False)
-        tsstop = datetime.now().timestamp()
-        aux.printmsg(f'[INFO] took {aux.timestampDelta2String(tsstop-tsfrom)} to analyze all {TotalLayers} single layers from {os.path.basename(medfname)}')
+        bindecart = os.path.join(binpath, 'decart.exe')
+        ## doModelInference
+        if is_singleLayer:
+            cmd_inference = f'{bindecart} -verbose -w {thismed}'
+        else:
+            cmd_inference = f'{bindecart} -verbose -w {dstpath}'
+        os.system(cmd_inference)
+        consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+        logger.info(f'took {consumed_time[:-3]} to model inference single layer images from {os.path.basename(medfname)}')

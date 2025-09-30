@@ -12,8 +12,8 @@ from tqdm import tqdm
 from .amaconfig import pcENV
 from .amautility import updateDeCartConfig, replaceSpace2underscore, parseDeCartLog
 from .amautility import dumpMetadata2stdout
-from .amacsvdb import saveInferenceResult2CSV
-from .queryMED import getMetadataFromMED
+from .amacsvdb import saveInferenceResult2CSV, updateAnalyzedMetadata2DB
+from .queryMED import getMetadataFromMED, replaceLabelImageWithQRCode
 from .parseAIX import getCellsInfoFromAIX
 from .parseAIX import getUROaverageOfSAcells, getUROaverageOfTopCells
 from .parseAIX import countNumberOfUROtraits, countNumberOfTHYtraits
@@ -208,5 +208,22 @@ def cmdModelInference(wsipath, model_name=None, decart_version=None, config_file
         saveInferenceResult2CSV(medaix_metadata, wsipath)
         ## dump partial metadata to stdout
         dumpMetadata2stdout(medaix_metadata)
+        ## save metadata to sqlite3 database
+        dbname = PC_ARGS.envConfig['dbmeta_uro'] if modelname.lower() == 'aixuro' else PC_ARGS.envConfig['dbmeta_thy']
+        updateAnalyzedMetadata2DB(medaix_metadata, dbname)
     logger.trace(f'[inference] {modelname} model inference {wsipath} completed!')
+
+## ---------- ---------- ---------- ----------
+##  0️⃣ action to batch replace qrcode label images
+## ---------- ---------- ---------- ----------
+def replaceMEDLabelImageWithQRCode(medpath, bin_decart):
+    medlist = glob.glob(os.path.join(medpath, '*.med'))
+    if len(medlist) == 0:
+        logger.error(f'no any .med file in {medpath}')
+        return
+    bin_rasar = os.path.join(bin_decart, 'convert', 'rasar.exe')
+    for med in medlist:
+        logger.info(f'replacing label image in {os.path.basename(med)} by QR code of its filename')
+        replaceLabelImageWithQRCode(med, bin_rasar)
+    logger.info(f'label image replacement of med files in {medpath} completed!')
 

@@ -2,7 +2,7 @@ import argparse
 import psutil
 import re
 from loguru import logger
-from .modelWSI import cmdModelInference
+from .modelWSI import cmdModelInference, replaceMEDLabelImageWithQRCode
 from .amaconfig import initLogger, pcENV
 from .amautility import updateDeCartConfig
 from .parseAIX import retrieveAnalysisMetadata
@@ -36,7 +36,7 @@ def main():
     parser.add_argument("-d", "--destpath", help="destination path")
     parser.add_argument("-f", "--wsipath", help="wsi file or wsi folder or med/aix folder", required=True)
     parser.add_argument("-j", "--configjson", help="configuration settings")
-    parser.add_argument("-l", "--layers", help='[i, j]: from layer-i to layer-j')
+    parser.add_argument("-l", "--layers", help='m-n: from layer-m to layer-n')
     parser.add_argument("-m", "--modelname", help='model product name')
     parser.add_argument("-o", "--option", default="inference", required=True)
     parser.add_argument("-p", "--decartpath", help='decart folder')
@@ -44,33 +44,36 @@ def main():
     args = parser.parse_args()
     # initiate Logger
     initLogger()
-    # initiate parameters for this HW environment
+    # initiate parameter
     AMA_ARGS = pcENV()
-    AMA_ARGS.loadConfigJson(args.configjson) if args.configjson else AMA_ARGS.defaultConfig()
-    # actions
+    config_file = args.configjson
+    AMA_ARGS.loadConfigJson(config_file) if config_file else AMA_ARGS.defaultConfig()
+    # do actions
     action = args.option.lower()
-    if action == 'inference':
+    if action == 'inference':       ## running model inference
         cmdModelInference(args.wsipath, model_name=args.modelname, decart_version=args.decartversion, config_file=args.configjson)
-    elif action == 'analysis':
+    elif action == 'analysis':      ## analyzing metadata from .aix folder, save to CSV
         retrieveAnalysisMetadata(args.wsipath)
-    elif action == 'extract':
+    elif action == 'extract':       ## extract every single layers from mutiple layers of .med file
         layer_range = args.layers
         zrange = []     ## default: best-z only
         if layer_range:
             if bool(re.match(r'^[\d-]+$', layer_range)) == False:
                 logger.error(f'do not know which layers need to be extracting: {layer_range}')
             else:
-                zrange = args.layers.split('-')
+                layers = args.layers.split('-')
                 if len(zrange) <= 2:
-                    zrange.append(int(layer_range[0]))
-                    zrange.append(int(layer_range[1]))
+                    zrange.append(int(layers[0]))
+                    zrange.append(int(layers[1]))
         ##
         if args.modelname:
             thismodel = args.modelname
             updateDeCartConfig(thismodel, AMA_ARGS.envConfig['decartyaml'])
         else:
             thismodel = None
-        extractSingleLayersFromMultiLayersMED(args.wsipath, args.destpath, whichlayers=zrange, modelname=thismodel)
+        extractSingleLayersFromMultiLayersMED(args.wsipath, args.destpath, binpath=AMA_ARGS.envConfig['decartpath'], whichlayers=zrange, modelname=thismodel)
+    elif action == 'qrcode':
+        replaceMEDLabelImageWithQRCode(args.wsipath, AMA_ARGS.envConfig['decartpath'])
     else:
         logger.error(f'[cli.py] unknown action {action}')
         usage_example = '''Usage:
@@ -80,6 +83,8 @@ def main():
             ama-go -o analysis -f d:\workfolder\inference\test
           [option='extract'] for extract single layer images from .med file
             ama-go -o extarct -f multiple_layers.med -d dest_folder_path -l 0-4
+          [option='qrcode'] for replacing label image by qr-code in .med file
+            ama-go -o qrcode -f d:\workfolder\change-to-qrcode
         '''
         print('-'*80)
         print(usage_example)

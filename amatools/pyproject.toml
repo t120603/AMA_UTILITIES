@@ -10,14 +10,14 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["loguru", 
 				"shapely", "func_timeout",
-                "numpy", "pillow", "webp", 
+                "numpy", "pillow", "webp",
 				"openslide-python",
                 "pywin32", 
 				"PyYAML",
 				"psutil",
 				"datetime",
 				"wmi", "GPUtil",
-				"tqdm",
+				"tqdm", "qrcode",
 			    ]
 
 [project.scripts]
