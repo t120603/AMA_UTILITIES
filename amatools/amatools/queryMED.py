@@ -11,7 +11,7 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 import qrcode
 from .asarlib import AsarFile
-from .amautility import replaceSpace2underscore, updateDeCartConfig
+from .amautility import replaceSpace2underscore
 
 ## ---------- ---------- ---------- ----------
 ## utility (using asarlib) to 

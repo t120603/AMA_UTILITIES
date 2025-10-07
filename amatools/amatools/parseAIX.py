@@ -2,6 +2,7 @@
 import os, glob
 import gzip
 import json
+import numpy as np
 import shapely.geometry
 from loguru import logger
 from tqdm import tqdm
@@ -91,7 +92,10 @@ def getCellsInfoFromAIX(aixfile, mpp=None):
                     thiscell['segments_nuclei'] = cbody[kk][1]['segments']
                 if mpp is not None:
                     thiscell['cellarea'] = calculateCellArea(thiscell['segments_cell'], mpp)
-                    thiscell['nucleiarea'] = calculateCellArea(thiscell['segments_nuclei'], mpp)
+                    thiscell['nucleicalc'] = calculateCellArea(thiscell['segments_nuclei'], mpp)
+                else:
+                    thiscell['cellarea'] = 0.0
+                thiscell['nucleiarea'] = thiscell['cellarea']*thiscell['ncratio']
 
                 thiscell['probability'] = cdata.get('prob', 0.0)
                 thiscell['score'] = cdata.get('score', 0.0)
@@ -132,21 +136,9 @@ def getCellsInfoFromAIX(aixfile, mpp=None):
                     logger.error(f'{os.path.basename(aixfile)} has unknown cell type ID:{category}.')
                 thiscell['cellname'] = cbody[kk][1]['name']
                 thiscell['category'] = category
-                '''
                 thiscell['segments'] = cbody[kk][1]['segments']
                 if mpp is not None:
                     thiscell['cellarea'] = calculateCellArea(thiscell['segments'], mpp)
-                '''
-                if category != 1:  ## cell
-                    thiscell['segments_cell'] = cbody[kk][1]['segments']
-                    thiscell['segments_nuclei'] = cbody[kk+1][1]['segments']
-                else:   ## nuclei
-                    thiscell['segments_cell'] = []
-                    thiscell['segments_nuclei'] = cbody[kk][1]['segments']
-                thiscell['ncratio']  = cdata.get('ncRatio', 0.0)
-                if mpp is not None:
-                    thiscell['cellarea'] = calculateCellArea(thiscell['segments_cell'], mpp)
-                    thiscell['nucleiarea'] = calculateCellArea(thiscell['segments_nuclei'], mpp)
 
                 thiscell['probability'] = cdata.get('prob', 0.0)
                 thiscell['score'] = cdata.get('score', 0.0)
@@ -201,6 +193,51 @@ def getUROaverageOfSAcells(tclist):
 
     return averageURO
 
+## ---------- ---------- ---------- ----------
+## average/error of NC ratio and Nuclei area of suspicious/atypical cells
+## simulate the nuclei area based on cell area and NC ratio
+## ---------- ---------- ---------- ----------
+def calculateUROaverageOfSAcells(tclist):
+    averageURO = {
+        'suspicious': {'cell_area': 0.0, 'cell_error': 0.0, 'nuclei_area': 0.0, 'nuclei_error': 0.0, 'nc_ratio': 0.0, 'ratio_error': 0.0},
+        'atypical': {'cell_area': 0.0, 'cell_error': 0.0, 'nuclei_area': 0.0, 'nuclei_error': 0.0, 'nc_ratio': 0.0, 'ratio_error': 0.0},
+    }
+    filteredcells = filter(lambda x: (x['category'] == 2), tclist)
+    suspicious_cells = list(filteredcells)
+    filteredcells = filter(lambda x: (x['category'] == 3), tclist)
+    atypical_cells = list(filteredcells)
+    cellarea_suspicious, nucleiarea_suspicious, ncratio_suspicious = [], [], []
+    cellarea_atypical, nucleiarea_atypical, ncratio_atypical = [], [], []
+    if len(suspicious_cells) > 0:
+        for i in range(len(suspicious_cells)):
+            cellarea_suspicious.append(round(suspicious_cells[i]['cellarea'], 2))
+            nucleiarea_suspicious.append(round(suspicious_cells[i]['nucleiarea'], 0))
+            #nucleiarea_suspicious.append(round(suspicious_cells[i]['nucleicalc'], 0))
+            ncratio_suspicious.append(round(suspicious_cells[i]['ncratio'], 2))
+        averageURO['suspicious']['cell_area'] = np.mean(cellarea_suspicious)
+        averageURO['suspicious']['cell_error'] = np.std(cellarea_suspicious)
+        averageURO['suspicious']['nuclei_area'] = np.mean(nucleiarea_suspicious)
+        averageURO['suspicious']['nuclei_error'] = np.std(nucleiarea_suspicious)
+        averageURO['suspicious']['nc_ratio'] = np.mean(ncratio_suspicious)
+        averageURO['suspicious']['ratio_error'] = np.std(ncratio_suspicious)
+    if len(atypical_cells) > 0:
+        for i in range(len(atypical_cells)):
+            cellarea_atypical.append(round(atypical_cells[i]['cellarea'], 2))
+            nucleiarea_atypical.append(round(atypical_cells[i]['nucleiarea'], 0))
+            #nucleiarea_atypical.append(round(atypical_cells[i]['nucleicalc'], 0))
+            ncratio_atypical.append(round(atypical_cells[i]['ncratio'], 2))
+        averageURO['atypical']['cell_area'] = np.mean(cellarea_atypical)
+        averageURO['atypical']['cell_error'] = np.std(cellarea_atypical)
+        averageURO['atypical']['nuclei_area'] = np.mean(nucleiarea_atypical)
+        averageURO['atypical']['nuclei_error'] = np.std(nucleiarea_atypical)
+        averageURO['atypical']['nc_ratio'] = np.mean(ncratio_atypical)
+        averageURO['atypical']['ratio_error'] = np.std(ncratio_atypical)
+    ##
+    #logger.debug(f'Atypical Cell Area: {cellarea_atypical}')
+    #logger.debug(f'Atypical N/C Ratio: {ncratio_atypical}')
+    #logger.debug(f'Atypical Nuclei Area: {nucleiarea_atypical}')
+    return averageURO
+
 ## count/analyze the cell information in AIxURO model
 def getUROaverageOfTopCells(tclist, topNum, suspiciousOnly):
     averageTOP = {
@@ -216,8 +253,9 @@ def getUROaverageOfTopCells(tclist, topNum, suspiciousOnly):
                         tclist[i]['probability'],
                         tclist[i]['ncratio'],
                         tclist[i]['cellarea'],
-                        tclist[i]['nucleiarea'])
+                        tclist[i]['nucleiarea'],
                         #tclist[i]['cellarea']*tclist[i]['ncratio'])
+                        tclist[i]['traits'])
             if tclist[i]['category'] == 2:
                 scells.append(thiscell)
             else:
@@ -339,6 +377,50 @@ def countNumberOfTHYtraits(tclist, maxTraits, threshold):
     return traitCount
 
 ## -------------------------------------------------------------- 
+##  get CELL AREA data of suspicious/atypical cells for chart
+## -------------------------------------------------------------- 
+def get_URO_CellAreaData(sclist, aclist):
+    scCellArea = []
+    acCellArea = []
+    for i in range(len(sclist)):
+        scCellArea.append(round(sclist[i]['cellarea'], 0))
+    for i in range(len(aclist)):
+        acCellArea.append(round(aclist[i]['cellarea'], 0))
+    sc_elements, sc_counts = np.unique(scCellArea, return_counts=True)
+    ac_elements, ac_counts = np.unique(acCellArea, return_counts=True)
+    return sc_elements, sc_counts, ac_elements, ac_counts
+
+## -------------------------------------------------------------- 
+##  get NUCLEUS AREA data of suspicious/atypical cells for chart
+## -------------------------------------------------------------- 
+def get_URO_NucleusAreaData(sclist, aclist):
+    scNucleusArea = []
+    acNucleusArea = []
+    for i in range(len(sclist)):
+        #scNucleusArea.append(round(sclist[i]['nucleicalc'], 0))
+        scNucleusArea.append(round(sclist[i]['nucleiarea'], 0))
+    for i in range(len(aclist)):
+        #acNucleusArea.append(round(aclist[i]['nucleicalc'], 0))
+        acNucleusArea.append(round(aclist[i]['nucleiarea'], 0))
+    sc_elements, sc_counts = np.unique(scNucleusArea, return_counts=True)
+    ac_elements, ac_counts = np.unique(acNucleusArea, return_counts=True)
+    return sc_elements, sc_counts, ac_elements, ac_counts
+
+## -------------------------------------------------------------- 
+##  get N/C RATIO data of suspicious/atypical cells for chart
+## -------------------------------------------------------------- 
+def get_URO_NCRatioData(sclist, aclist):
+    scNCRatio = []
+    acNCRatio = []
+    for i in range(len(sclist)):
+        scNCRatio.append(round(sclist[i]['ncratio'], 2))
+    for i in range(len(aclist)):
+        acNCRatio.append(round(aclist[i]['ncratio'], 2))
+    sc_elements, sc_counts = np.unique(scNCRatio, return_counts=True)
+    ac_elements, ac_counts = np.unique(acNCRatio, return_counts=True)
+    return sc_elements, sc_counts, ac_elements, ac_counts
+
+## -------------------------------------------------------------- 
 ##  query category name by category id for AIxURO and AIxTHY models
 ## -------------------------------------------------------------- 
 ## special case for decart 2.0.x ad 2.1.x (AIxURO only)
@@ -386,8 +468,8 @@ def retrieveAnalysisMetadata(workpath, thismpp=None):
             logger.error('input data is not a valid float data, can not continue analyzing!')
             logger.warning('Please get the MPP data, and run this appication again!')
             return None
+    cellmeta, tagsmeta = [], []
     if thismpp != 0.0:
-        cellmeta, tagsmeta = [], []
         aixlist = glob.glob(os.path.join(workpath, '*.aix'))
         for aixfile in tqdm(aixlist, desc=f'collecting analysis metadata from {workpath}'):
             ## collect analysis metadata
@@ -418,9 +500,15 @@ def retrieveAnalysisMetadata(workpath, thismpp=None):
             else:
                 thistrait = countNumberOfTHYtraits(cellslist, NUM_TRAIT_THY, CRITERA_TRAIT)
             tagsmeta.append(thistrait)
+    if cellmeta and tagsmeta:
+        modelname = cellmeta[0]['modelname']
+        modelversion = cellmeta[0]['modelversion']
         ## summary of analysis metadata
         saveAnalysisMetadata2CSV(modelname, modelversion, aixlist, cellmeta)
-        saveTraitsSummary2CSV(modelname, modelversion, aixlist, tagsmeta)
+                                                                         
         ## summary of traits
+        saveTraitsSummary2CSV(modelname, modelversion, aixlist, tagsmeta)
         logger.info('[analysis] .aix files analysis completed!!')
+    else:
+        logger.warning('No .aix files found in the directory, or MPP data is not available, can not continue analyzing!')
 

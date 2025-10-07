@@ -37,6 +37,10 @@ ama-go -o qrcode -f <path-to-med-folder>
     - default to extract BestFocusLayer if not specified layers
     - set modelname will trigger model inference after single layer extraction
 ```
+#### retrieve metadata and crop cell image of top N cells
+```
+ama-go -o readtopN -f <fullpath-med&aix-file>
+```
 
 [ama-go parameters]  
 `-d` or `--destpath`: destination folder to store output files
@@ -51,6 +55,7 @@ ama-go -o qrcode -f <path-to-med-folder>
 ### Version
 | Date | Version | Description |
 |----------|---------|-------------|
+| 2025-10-06 | 0.0.6 | added feature: retrieve metadata and crop cell image of top N cells, and output to a HTML file |
 | 2025-09-28 | 0.0.5 | added features: extract single layer from .med file, pack multiple layers to .med file, replace label with qrcode |
 | 2025-09-25 | 0.0.4 | main features: model inference, parse metadata to database/csv |
 

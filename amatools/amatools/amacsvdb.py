@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from loguru import logger
 from tqdm import tqdm
+import sqlite3
 from .amaconfig import getMSinfo
 
 ##---------------------------------------------------------
@@ -338,55 +339,131 @@ def saveTraitsSummary2CSV(whichmodel, modelver, aixlist, taglist):
 ## ---------- ---------- ---------- ----------
 ## 🩻 save model inference metadata to Sqlite3 database
 ## ---------- ---------- ---------- ----------
-def insertAnalyzedMetadata2DB(medata, dbname):
-    if os.path.isfile(dbname) == False:
-        logger.warning(f'database {dbname} does not exist')
-        createNewQCxDB(medata['modeln'].lower(), dbname)
-    labelname = medata['label']
-    modelname, model_ver = medata['modeln'], medata['modelv']
-    medfile, medpath = medata['medfile'], medata['medpath']
-    ## check if this slide already existed
-    if modelname.lower() == 'aixuro':
-        slidetype = 'urine'
-    elif modelname.lower() == 'aixthy':
-        slidetype = 'thyroid'
-    mdata = queryAnalyzedMetadataFromDB(dbname, labelname, slidetype)
-    if len(mdata):
-        for k in range(len(mdata)):
-            if mdata[k]['model'] == f'{modelname} {model_ver}':
-                logger.error(f'slide {labelname} already existed in database {dbname}')
-                return
-        logger.warning(f"slide {labelname} already existed in database {dbname}, but analyzed by {modelname} {model_ver} this time")
-    ##
-    if medata['modeln'].lower() == 'aixuro':
-        sql_head = "INSERT INTO QCxURO \
-            (slidelabel, zlayer, zfocus, similarity, suspicious, atypical, degenerated, benign, \
-            s_avg_ncratio, s_avg_nuclarea, a_avg_ncratio, a_avg_nuclarea, \
-            t_avg_ncratio, t_avg_nuclarea, modelProduct, modelVersion, \
-            medfname, medfpath) VALUES "
-        sql_tail = f"('{labelname}', {medata['zlayer']}, {medata['zfocus']}, {medata['similarity']}, \
-            {medata['suspicious']}, {medata['atypical']}, {medata['degenerated']}, {medata['benign']}, \
-            {medata['s_avg_ncratio']}, {medata['s_avg_nucarea']}, \
-            {medata['a_avg_ncratio']}, {medata['a_avg_nucarea']}, \
-            {medata['t_avg_ncratio']}, {medata['t_avg_nucarea']}, \
-            '{modelname}', '{model_ver}', '{medfile}', '{medpath}')"
-    elif medata['modeln'].lower() == 'aixthy':
-        sql_head = "INSERT INTO QCxTHY \
-            (slidelabel, zlayer, zfocus, similarity, \
-            category1, category2, category3, category4, category5, category6, \
-            trait1, trait2, trait3, trait4, trait5, trait6, trait7, trait8, trait9, trait10, \
-            trait11, trait12, trait13, trait14, trait15, trait16, trait17, trait18, trait19, trait20, \
-            modelProduct, modelVersion, medfname, medfpath) VALUES "
-        sql_tail = f"('{labelname}', {medata['zlayer']}, {medata['zfocus']}, {medata['similarity']}, \
-            {medata['category'][1]}, {medata['category'][2]}, {medata['category'][3]}, \
-            {medata['category'][4]}, {medata['category'][5]}, {medata['category'][6]}, \
-            {medata['traits'][0]}, {medata['traits'][1]}, {medata['traits'][2]}, {medata['traits'][3]}, \
-            {medata['traits'][4]}, {medata['traits'][5]}, {medata['traits'][6]}, {medata['traits'][7]}, \
-            {medata['traits'][8]}, {medata['traits'][9]}, {medata['traits'][10]}, {medata['traits'][11]}, \
-            {medata['traits'][12]}, {medata['traits'][13]}, {medata['traits'][14]}, {medata['traits'][15]}, \
-            {medata['traits'][16]}, {medata['traits'][17]}, {medata['traits'][18]}, {medata['traits'][19]}, \
-            '{modelname}', '{model_ver}', '{medfile}', '{medpath}')"
+def initiateDB4UROmetadata(dbname):
+    try:
+        with sqlite3.connect(dbname) as dbconn:
+            c = dbconn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS uroMetadata (
+                    wsifname TEXT PRIMARY KEY NOT NULL,
+                    suspicious INTEGER,
+                    atypical INTEGER,
+                    benign INTEGER,
+                    degenerated INTEGER,
+                    avg_top_nucleiarea REAL, 
+                    avg_top_cellarea REAL, 
+                    avg_top_ncratio REAL, 
+                    avg_s_nucleiarea REAL, 
+                    avg_s_cellarea REAL, 
+                    avg_s_ncratio REAL, 
+                    avg_a_nucleiarea REAL, 
+                    avg_a_cellarea REAL, 
+                    avg_a_ncratio REAL, 
+                    similarity REAL,
+                    modelname TEXT,
+                    modelversion TEXT,
+                    zlayers INTEGER,
+                    zbest INTEGER,
+                    mpp REAL,
+                    icc REAL,
+                    width INTEGER,
+                    height INTEGER,
+                    medfsize_MB REAL,
+                    wsifsize_MB REAL,
+                    analysis_date TEXT,
+                    conversion_time TEXT,
+                    inference_time TEXT,
+                    analysis_time TEXT,
+                    hw_os TEXT,
+                    hw_cpu TEXT,
+                    hw_gpu TEXT,
+                    hw_ram TEXT,
+                    scanner TEXT);
+            ''')
+            dbconn.commit()
+    except Exception as e:
+        logger.error(f'database {dbname} initiation failed: {e}')
+#    finally:
+#        if dbconn:
+#            dbconn.close()
 
+def initiateDB4THYmetadata(dbname):
+    try:
+        with sqlite3.connect(dbname) as dbconn:
+            c = dbconn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS thyMetadata (
+                    wsifname TEXT PRIMARY KEY NOT NULL,
+                    follicular INTEGER,
+                    oncocytic INTEGER,
+                    epithelioid INTEGER,
+                    lymphocytes INTEGER,
+                    histiocytes INTEGER,
+                    colloid INTEGER,
+                    similarity REAL,
+                    modelname TEXT,
+                    modelversion TEXT,
+                    zlayers INTEGER,
+                    zbest INTEGER,
+                    mpp REAL,
+                    icc REAL,
+                    width INTEGER,
+                    height INTEGER,
+                    medfsize_MB REAL,
+                    wsifsize_MB REAL,
+                    analysis_date TEXT,
+                    conversion_time TEXT,
+                    inference_time TEXT,
+                    analysis_time TEXT,
+                    hw_os TEXT,
+                    hw_cpu TEXT,
+                    hw_gpu TEXT,
+                    hw_ram TEXT,
+                    scanner TEXT);
+            ''')
+            dbconn.commit()
+    except Exception as e:
+        logger.error(f'database {dbname} initiation failed: {e}')
+#    finally:
+#        if dbconn:
+#            dbconn.close()
+
+def insertAnalyzedMetadata2DB(medaix, dbname):
+    modelname = medaix['modelname'].lower()
+    ##
+    if modelname == 'aixuro':
+        sql_head = "INSERT INTO uroMetadata \
+                (wsifname, suspicious, atypical, benign, degenerated, \
+                avg_top_nucleiarea, avg_top_cellarea, avg_top_ncratio, \
+                avg_s_nucleiarea, avg_s_cellarea, avg_s_ncratio, \
+                avg_a_nucleiarea, avg_a_cellarea, avg_a_ncratio, \
+                similarity, modelname, modelversion, zlayers, zbest, mpp, icc, \
+                medfsize_MB, wsifsize_MB, width, height, \
+                analysis_date, conversion_time, inference_time, analysis_time, \
+                hw_os, hw_cpu, hw_gpu, hw_ram, scanner) VALUES "
+        sql_tail = f"('{medaix['wsifname']}', {medaix['suspicious']}, {medaix['atypical']}, {medaix['benign']}, {medaix['degenerated']}, \
+            {medaix['avg_top_nucleiarea']}, {medaix['avg_top_cellarea']}, {medaix['avg_top_ncratio']}, \
+            {medaix['avg_s_nucleiarea']}, {medaix['avg_s_cellarea']}, {medaix['avg_s_ncratio']}, \
+            {medaix['avg_a_nucleiarea']}, {medaix['avg_a_cellarea']}, {medaix['avg_a_ncratio']}, \
+            {medaix['similarity']}, '{medaix['modelname']}', '{medaix['modelversion']}', \
+            {medaix['zlayers']}, {medaix['zbest']}, {medaix['mpp']}, '{medaix['icc']}', \
+            {medaix['medfsize_MB']}, {medaix['wsifsize_MB']}, {medaix['width']}, {medaix['height']}, \
+            '{medaix['analysis_date']}', '{medaix['conversion_time']}', '{medaix['inference_time']}', '{medaix['analysis_time']}', \
+            '{medaix['hw_os']}', '{medaix['hw_cpu']}', '{medaix['hw_gpu']}', '{medaix['hw_ram']}', '{medaix['scanner']}')"
+    elif modelname == 'aixthy':
+        sql_head = "INSERT INTO thyMetadata \
+            (wsifname, follicular, oncocytic, epithelioid, lymphocytes, histiocytes, colloid, \
+            similarity, modelname, modelversion, zlayers, zbest, mpp, icc, \
+            medfsize_MB, wsifsize_MB, width, height, \
+            analysis_date, conversion_time, inference_time, analysis_time, \
+            hw_os, hw_cpu, hw_gpu, hw_ram, scanner) VALUES "
+        sql_tail = f"('{medaix['wsifname']}', {medaix['follicular']}, {medaix['oncocytic']}, {medaix['epithelioid']}, \
+            {medaix['lymphocytes']}, {medaix['histiocytes']}, {medaix['colloid']}, \
+            {medaix['similarity']}, '{medaix['modelname']}', '{medaix['modelversion']}', \
+            {medaix['zlayers']}, {medaix['zbest']}, {medaix['mpp']}, '{medaix['icc']}', \
+            {medaix['medfsize_MB']}, {medaix['wsifsize_MB']}, {medaix['width']}, {medaix['height']}, \
+            '{medaix['analysis_date']}', '{medaix['conversion_time']}', '{medaix['inference_time']}', '{medaix['analysis_time']}', \
+            '{medaix['hw_os']}', '{medaix['hw_cpu']}', '{medaix['hw_gpu']}', '{medaix['hw_ram']}', '{medaix['scanner']}')"
     sql_str = sql_head + sql_tail
     try:
         with sqlite3.connect(dbname) as dbconn:
@@ -405,41 +482,206 @@ def insertAnalyzedMetadata2DB(medata, dbname):
 ## ---------- ---------- ---------- ----------
 ## 🗄️ update analyzed metadata to Sqlite3 database
 ## ---------- ---------- ---------- ----------
-def updateAnalyzedMetadata2DB(aixmeta, thismodel, qcxDBpath, dbname):
+def updateAnalyzedMetadata2DB(aixmeta, dbname):
     if len(aixmeta) == 0:
         logger.error('no analyzed metadata!')
         return
-    modelProduct = aixmeta[0]['modelname']
+    modelProduct = aixmeta[0]['modelname'].lower()
     modelVersion = aixmeta[0]['modelversion']
 
-    thisdb = os.path.join(qcxDBpath, dbname)
-    backdb = os.path.join(os.getenv('localappdata'), 'ama_qc', dbname)
-    ## insert analyzed metadata into database for QC
-    for ii in range(len(aixmeta)):
-        thisdata = {}
-        thisdata['label'] = os.path.splitext(aixmeta[ii]['wsifname'])[0]
-        thisdata['zlayer'] = aixmeta[ii]['sizez']
-        thisdata['zfocus'] = aixmeta[ii]['bestfocuslayer']
-        thisdata['similarity'] = aixmeta[ii]['similarity']
-        thisdata['modeln'] = modelProduct
-        thisdata['modelv'] = modelVersion
-        thisdata['medfile'] = f"{thisdata['label']}.med"
-        thisdata['medpath'] = path_medaix
-        if modelProduct.lower() == 'aixuro':
-            thisdata['suspicious']  = aixmeta[ii]['cellCount'][2]
-            thisdata['atypical']    = aixmeta[ii]['cellCount'][3]
-            thisdata['degenerated'] = aixmeta[ii]['cellCount'][7]
-            thisdata['benign']      = aixmeta[ii]['cellCount'][4]
-            thisdata['t_avg_ncratio'] = aixmeta[ii]['avgtop24ncratio']
-            thisdata['t_avg_nucarea'] = aixmeta[ii]['avgtop24nucarea']
-            thisdata['s_avg_ncratio'] = aixmeta[ii]['savgncratio']
-            thisdata['s_avg_nucarea'] = aixmeta[ii]['savgnucarea']
-            thisdata['a_avg_ncratio'] = aixmeta[ii]['aavgncratio']
-            thisdata['a_avg_nucarea'] = aixmeta[ii]['aavgnucarea']
+    thisdb = os.path.join(os.getenv('localappdata'), 'amatools', dbname)
+    if os.path.isfile(thisdb) == False:
+        logger.warning(f'database {thisdb} does not exist')
+        if modelProduct == 'aixuro':
+            initiateDB4UROmetadata(thisdb)
+        elif modelProduct == 'aixthy':
+            initiateDB4THYmetadata(thisdb)
         else:
-            thisdata['category'] = aixmeta[ii]['cellCount']
-            thisdata['traits']   = aixmeta[ii]['traits']
+            logger.error(f'unknown model {modelProduct} to insert to database {thisdb}')
+            return
+    ## insert analyzed metadata into database for QC
+    thisOS, thatOS, thisCPU, thisGPU, thisRAM = getMSinfo()
+    for mdata in aixmeta:
+        thisdata = {}
+        thisdata['wsifname'] = mdata['wsifname']
+        if modelProduct == 'aixuro':
+            thisdata['suspicious']       = mdata['cellCount'][2]
+            thisdata['atypical']         = mdata['cellCount'][3]
+            thisdata['benign']           = mdata['cellCount'][4]
+            thisdata['degenerated']      = mdata['cellCount'][7]
+            thisdata['avg_top_nucleiarea']  = mdata['topnucarea']
+            thisdata['avg_top_cellarea'] = mdata['topcelarea']
+            thisdata['avg_top_ncratio'] = mdata['topncratio']
+            thisdata['avg_s_nucleiarea'] = mdata['avgsnucarea']
+            thisdata['avg_s_cellarea'] = mdata['avgscelarea']
+            thisdata['avg_s_ncratio']  = mdata['avgsncratio']
+            thisdata['avg_a_nucleiarea'] = mdata['avganucarea']
+            thisdata['avg_a_cellarea'] = mdata['avgacelarea']
+            thisdata['avg_a_ncratio']  = mdata['avgancratio']
+        else:
+            if modelVersion[:6] in ['2025.2']:
+                thisdata['follicular']  = mdata['cellCount'][1]
+                thisdata['oncocytic']   = mdata['cellCount'][2]
+                thisdata['epithelioid'] = mdata['cellCount'][3]
+                thisdata['lymphocytes'] = mdata['cellCount'][4]
+                thisdata['histiocytes'] = mdata['cellCount'][5]
+                thisdata['colloid']     = mdata['cellCount'][6]
+            else:
+                thisdata['follicular']  = mdata['cellCount'][1]
+                thisdata['oncocytic']   = mdata['cellCount'][2]     ## hurthle
+                thisdata['epithelioid'] = 0
+                thisdata['lymphocytes'] = mdata['cellCount'][4]
+                thisdata['histiocytes'] = mdata['cellCount'][3]
+                thisdata['colloid']     = mdata['cellCount'][5]
 
-        insertInferenceMetadata2DB(thisdata, thisdb)
-    ## backup updated database 
-    shutil.copy(thisdb, backdb)
+        thisdata['similarity'] = mdata['similarity']
+        thisdata['modelname'] = mdata['modelname']
+        thisdata['modelversion'] = mdata['modelversion']
+        thisdata['zlayers'] = mdata['sizez']
+        thisdata['zbest'] = mdata['bestfocuslayer']
+        thisdata['mpp'] = mdata['mpp']
+        thisdata['icc'] = mdata['icc']
+        thisdata['width'] = mdata['width']
+        thisdata['height'] = mdata['height']
+        thisdata['medfsize_MB'] = mdata['medfsize']
+        thisdata['wsifsize_MB'] = mdata['wsifsize']
+        thisdata['analysis_date'] = datetime.fromtimestamp(mdata['execution_date']).strftime('%Y-%m-%d %H:%M:%S')
+        thisdata['conversion_time'] = (datetime(1970,1,1)+timedelta(seconds=mdata['convert_timestamp'])).strftime('%H:%M:%S.%f')[:-3]
+        thisdata['inference_time'] = (datetime(1970,1,1)+timedelta(seconds=mdata['inference_timestamp'])).strftime('%H:%M:%S.%f')[:-3]
+        thisdata['analysis_time'] = (datetime(1970,1,1)+timedelta(seconds=mdata['analysis_timestamp'])).strftime('%H:%M:%S.%f')[:-3]
+        thisdata['hw_os'], thisdata['hw_cpu'], thisdata['hw_gpu'], thisdata['hw_ram'] = thisOS, thisCPU, thisGPU, thisRAM
+        thisdata['scanner'] = mdata['scanner']
+
+        insertAnalyzedMetadata2DB(thisdata, thisdb)
+    logger.trace(f'update analyzed metadata to {thisdb} completed!')
+
+##---------------------------------------------------------
+## save analysis metadata and TOP cell tiles to HTML file
+##---------------------------------------------------------
+def save2HTML(htmlfile, sm):
+    ## create table for top cell tile and metadata
+    topcelltable = ''
+    for i in range(len(sm['topcell'])):
+        if i % 3 == 0:
+            topcelltable += '<tr>\n'
+        cellimg = sm['topname'][i]
+        topcelltable += f"<td><img src='{cellimg}'></td>\n"
+        # metadate and Morphology
+        thiscell = sm['topcell'][i]
+        #print(thiscell)
+        topcelltable += f"<td>#{i+1}<br>N/C Ratio<br>{thiscell[3]:.4f}<br>"
+        topcelltable += f"Nucleus Area<br>{thiscell[5]:.4f} μm²<br>"
+        topcelltable += f"Cell Area<br>{thiscell[4]:.4f} μm²<br>"
+        celltags = [(i, thiscell[6][i]) for i in range(len(thiscell[6]))]
+        sortedtags = sorted(celltags, key=lambda x: x[1], reverse=True)
+        for j in range(len(sortedtags)):
+            if sortedtags[j][1] >= 0.4:
+                topcelltable += f"<img src='D:\\workfolder\\tagicons\\{sortedtags[j][0]:02d}.png'>" 
+        topcelltable += f"</td>\n"
+        if (i+1) % 3 == 0:
+            topcelltable += '</tr>\n'
+    # 建立 HTML 檔案內容
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{sm['wsifname']}</title>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 20px;
+            }}
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+                margin-bottom: 20px;
+            }}
+            table, th, td {{
+                border: 1px solid black;
+            }}
+            th, td {{
+                padding: 8px;
+                text-align: left;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>{sm['wsifname']}</h1>
+        <h2>CELLUARITY</h2>
+            <table class='celluarity'>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>SUSPICIOUS CELL</th>
+                        <th>ATYPICAL CELL</th>
+                        <th>BENIGN CLL</th>
+                        <th>DEGENERATED</th>
+                        <th>NUCLEUS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>CELL COUNT</td>
+                        <td>{sm['cellcount'][2]:>6,}</td>
+                        <td>{sm['cellcount'][3]:>6,}</td>
+                        <td>{sm['cellcount'][4]:>6,}</td>
+                        <td>{sm['cellcount'][7]:>6,}</td>
+                        <td>{sm['cellcount'][1]:>6,}</td>
+                    </tr>
+                </tbody>
+            </table>
+        <h2>AVERAGE METADATA</h2>
+            <table border=0>
+                <tr>
+                    <td><img src="URO_NCRatio_Chart.png" alt="N/C RATIO"></td>
+                    <td><img src="URO_NucleusArea_Chart.png" alt="Nucleus Area"></td>
+                </tr>
+            </table>
+            <table class='avgmetadata'>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>AVERAGE N/C RATIO</th>
+                        <th>AVERAGE NUCLEUS AREA</th>
+                        <th>AVERAGE CELL AREA</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>TOP24</td>
+                        <td>{sm['avgtopdata']['nc_ratio']:.4f}</td>
+                        <td>{sm['avgtopdata']['nuclei_area']:.4f} μm²</td>
+                        <td>{sm['avgtopdata']['cell_area']:.4f} μm²</td>
+                    </tr>
+                    <tr>
+                        <td>SUSPICIOUS CELL</td>
+                        <td>{sm['avgsamdata']['suspicious']['nc_ratio']:.4f}</td>
+                        <td>{sm['avgsamdata']['suspicious']['nuclei_area']:.4f} μm²</td>
+                        <td>{sm['avgsamdata']['suspicious']['cell_area']:.4f} μm²</td>
+                    </tr>
+                    <tr>
+                        <td>Atypical CELL</td>
+                        <td>{sm['avgsamdata']['atypical']['nc_ratio']:.4f}</td>
+                        <td>{sm['avgsamdata']['atypical']['nuclei_area']:.4f} μm²</td>
+                        <td>{sm['avgsamdata']['atypical']['cell_area']:.4f} μm²</td>
+                    </tr>
+                </tbody>
+            </table>
+        <h2>TOP24 CELLS</h2>
+            <table border="0">
+                {topcelltable}
+            </table>
+    </body>
+    </html>
+    """
+    # 將 HTML 內容儲存到檔案
+    with open(htmlfile, "w", encoding="utf-8") as file:
+        file.write(html_content)
+    logger.info(f"{os.path.basename(htmlfile)} completed!")
+

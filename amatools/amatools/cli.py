@@ -3,6 +3,7 @@ import psutil
 import re
 from loguru import logger
 from .modelWSI import cmdModelInference, replaceMEDLabelImageWithQRCode
+from .modelWSI import getMetadataCellTile_topN
 from .amaconfig import initLogger, pcENV
 from .amautility import updateDeCartConfig
 from .parseAIX import retrieveAnalysisMetadata
@@ -74,6 +75,9 @@ def main():
         extractSingleLayersFromMultiLayersMED(args.wsipath, args.destpath, binpath=AMA_ARGS.envConfig['decartpath'], whichlayers=zrange, modelname=thismodel)
     elif action == 'qrcode':
         replaceMEDLabelImageWithQRCode(args.wsipath, AMA_ARGS.envConfig['decartpath'])
+    elif action == 'readtopn':
+        topN = int(args.layers) if args.layers else None
+        getMetadataCellTile_topN(args.wsipath, topN)
     else:
         logger.error(f'[cli.py] unknown action {action}')
         usage_example = '''Usage:
@@ -83,8 +87,10 @@ def main():
             ama-go -o analysis -f d:\workfolder\inference\test
           [option='extract'] for extract single layer images from .med file
             ama-go -o extarct -f multiple_layers.med -d dest_folder_path -l 0-4
-          [option='qrcode'] for replacing label image by qr-code in .med file
-            ama-go -o qrcode -f d:\workfolder\change-to-qrcode
+          [option='qrcode'] replace label image with QR code in .med file
+            ama-go -o qrcode -f <path-to-medfiles or medifle>
+          [option='readtopn'] retrieve metadata and top N cell tiles from .med/.aix file
+            ama-go -o readtopn -f medfname.med -l 24
         '''
         print('-'*80)
         print(usage_example)

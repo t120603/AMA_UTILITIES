@@ -12,12 +12,15 @@ from tqdm import tqdm
 from .amaconfig import pcENV
 from .amautility import updateDeCartConfig, replaceSpace2underscore, parseDeCartLog
 from .amautility import dumpMetadata2stdout
-from .amacsvdb import saveInferenceResult2CSV, updateAnalyzedMetadata2DB
+from .imgfuncs import saveCellTile2PNG
+from .amacsvdb import saveInferenceResult2CSV, updateAnalyzedMetadata2DB, save2HTML
 from .queryMED import getMetadataFromMED, replaceLabelImageWithQRCode
 from .parseAIX import getCellsInfoFromAIX
-from .parseAIX import getUROaverageOfSAcells, getUROaverageOfTopCells
+from .parseAIX import getUROaverageOfSAcells, calculateUROaverageOfSAcells, getUROaverageOfTopCells
 from .parseAIX import countNumberOfUROtraits, countNumberOfTHYtraits
+from .parseAIX import get_URO_NucleusAreaData, get_URO_NCRatioData, get_URO_CellAreaData
 from .parseAIX import NUM_TOP, CRITERA_TRAIT, NUM_TRAIT_THY
+from .pltfuncs import drawURO_AVG_NCRatio, drawURO_AVG_NucleusArea
 
 ##---------------------------------------------------------
 ## global variables, secret data, and criteria of 'score'
@@ -217,13 +220,141 @@ def cmdModelInference(wsipath, model_name=None, decart_version=None, config_file
 ##  0️⃣ action to batch replace qrcode label images
 ## ---------- ---------- ---------- ----------
 def replaceMEDLabelImageWithQRCode(medpath, bin_decart):
-    medlist = glob.glob(os.path.join(medpath, '*.med'))
-    if len(medlist) == 0:
-        logger.error(f'no any .med file in {medpath}')
-        return
+    t0 = time.perf_counter()
     bin_rasar = os.path.join(bin_decart, 'convert', 'rasar.exe')
-    for med in medlist:
-        logger.info(f'replacing label image in {os.path.basename(med)} by QR code of its filename')
-        replaceLabelImageWithQRCode(med, bin_rasar)
-    logger.info(f'label image replacement of med files in {medpath} completed!')
+    if os.path.isdir(medpath):  # folder with .med files
+        medlist = glob.glob(os.path.join(medpath, '*.med'))
+        if len(medlist) == 0:
+            logger.error(f'no any .med file in {medpath}')
+            return
+        for med in medlist:
+            logger.info(f'replacing label image in {os.path.basename(med)} by QR code of its filename')
+            replaceLabelImageWithQRCode(med, bin_rasar)
+        consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+        logger.info(f'label image replacement of med files in {medpath} completed with {consumed_time[:-3]} seconds!')
+    else:   ## .med file
+        logger.info(f'replacing label image in {os.path.basename(medpath)} by QR code of its filename')
+        replaceLabelImageWithQRCode(medpath, bin_rasar)
+        consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+        logger.info(f'label image replacement of {medpath} completed with {consumed_time[:-3]} seconds!')
+
+## ---------- ---------- ---------- ----------
+##  1️⃣ extract metadata and crop cell image of top N cells
+## ---------- ---------- ---------- ----------
+def getMetadataCellTile_topN(thisfile, topN=None, tilepath=None):
+    t0 = time.perf_counter()
+    fext = os.path.splitext(thisfile)[1][1:].lower()
+    if fext == 'med':
+        medfile = thisfile
+        aixfile = medfile.replace('.med', '.aix')
+    elif fext == 'aix':
+        aixfile = thisfile
+        medfile = thisfile.replace('.aix', '.med')
+    else:
+        logger.error(f'{thisfile} is not a valid .med or .aix file')
+        return    
+    if os.path.exists(medfile) == False or os.path.exists(aixfile) == False:
+        logger.error(f'need both {os.path.basename(medfile)} and {os.path.basename(aixfile)}')
+        return
+    ## retrieve metadata from .aix file
+    howmanyTOP = 24 if topN is None else topN
+    medjson = getMetadataFromMED(medfile)
+    aixinfo, cellcount, cellslist = getCellsInfoFromAIX(aixfile, mpp=medjson['MPP'])
+    if aixinfo['Model'] == 'AIxURO':    ## now, only for urine slide
+        if cellcount[2] == 0 and cellcount[3] == 0:
+            logger.warning(f'no suspicious or atypical cells found in {medfile}')
+            return
+        ## sort cellslist by category (suspicious&atypical) and score
+        filteredcells = filter(lambda x: (x['category'] == 2), cellslist)
+        suspicious_cells = list(filteredcells)
+        suspicious_cells.sort(key=lambda x: -x['score'])
+        filteredcells = filter(lambda x: (x['category'] == 3), cellslist)
+        atypical_cells = list(filteredcells)
+        atypical_cells.sort(key=lambda x: -x['score'])
+        '''
+        for i in range(len(suspicious_cells)):
+            item = suspicious_cells[i]
+            logger.info(f'{i+1:03d}/{howmanyTOP:03d} {item["category"]} {item["score"]:.4f} {item["cellname"]}')
+        for i in range(len(atypical_cells)):
+            item = atypical_cells[i]
+            logger.info(f'{i+1:03d}/{howmanyTOP:03d} {item["category"]} {item["score"]:.4f} {item["cellname"]}')
+        '''
+        ## cells count
+        out_cellscount = f'{aixinfo['Model']} {aixinfo['ModelVersion']} found'
+        if cellcount[2]:
+            out_cellscount += f' {cellcount[2]} suspicious cells'
+        if cellcount[3]:
+            out_cellscount += f' {cellcount[3]} atypical cells'
+        if cellcount[4]:
+            out_cellscount += f' {cellcount[4]} benign cells'
+        if cellcount[7]:
+            out_cellscount += f' {cellcount[7]} degenerated cells'
+        ## average .....
+        avg_ncratio = 'N/C RATIO: '
+        avg_nucleiarea = 'NUCLEUS AREA: '
+        avg_cellarea = 'CELL AREA: '
+        averageURO = calculateUROaverageOfSAcells(cellslist)
+        if cellcount[2]:
+            avg_ncratio += f'Suspicious cell: {averageURO["suspicious"]["nc_ratio"]:.2f}±{averageURO["suspicious"]["ratio_error"]:.2f}'
+            avg_nucleiarea += f'Suspicious cell: {averageURO['suspicious']['nuclei_area']:.1f}±{averageURO['suspicious']['nuclei_error']:.1f} μm²'
+            avg_cellarea += f'Suspicious cell: {averageURO['suspicious']['cell_area']:.2f}±{averageURO['suspicious']['cell_error']:.2f} μm²'
+        if cellcount[3]:
+            avg_ncratio += ' ; ' if cellcount[2] else ''
+            avg_ncratio += f'Atypical cell: {averageURO["atypical"]["nc_ratio"]:.2f}±{averageURO["atypical"]["ratio_error"]:.2f}'
+            avg_nucleiarea += ' ; ' if cellcount[2] else ''
+            avg_nucleiarea += f'Atypical cell: {averageURO["atypical"]["nuclei_area"]:.1f}±{averageURO["atypical"]["nuclei_error"]:.1f} μm²'
+            avg_cellarea += ' ; ' if cellcount[2] else ''
+            avg_cellarea += f'Atypical cell: {averageURO["atypical"]["cell_area"]:.2f}±{averageURO["atypical"]["cell_error"]:.2f} μm²'
+        logger.trace(out_cellscount)
+        logger.trace(avg_ncratio)
+        logger.trace(avg_nucleiarea)
+        logger.trace(avg_cellarea)
+        ## plot charts for N/C RATIO and NUCLEUS AREA
+        sc_elements, sc_counts, ac_elements, ac_counts = get_URO_NCRatioData(suspicious_cells, atypical_cells)
+        sc_nclarea, sc_nacount, ac_nclarea, ac_nacount = get_URO_NucleusAreaData(suspicious_cells, atypical_cells)
+        sc_cellarea, sc_cellcount, ac_cellarea, ac_cellcount = get_URO_CellAreaData(suspicious_cells, atypical_cells)
+        ## plot chart for NC ratio and Nucleus area
+        if not tilepath:
+            tilepath = os.path.splitext(medfile)[0] + '_tiles'
+        if os.path.exists(tilepath) == False:
+            os.makedirs(tilepath)
+        drawURO_AVG_NCRatio(tilepath, suspicious_cells, atypical_cells, averageURO)
+        drawURO_AVG_NucleusArea(tilepath, suspicious_cells, atypical_cells, averageURO)
+        ## crop cell image of top N cells
+        sizeZ = medjson.get('SizeZ', 1)
+        layerZ = 0 if sizeZ == 1 else medjson.get('BestFocusLayer', 0)
+        ## save cell tile image (default: 600x600)
+        howmany = 0
+        topcellname = []
+        for i in range(len(suspicious_cells)):
+            tilefname = os.path.join(tilepath, f'{howmany+1:02}_{suspicious_cells[i]["cellname"]}.png')
+            saveCellTile2PNG(medfile, tilefname, layerZ, suspicious_cells[i])
+            howmany += 1
+            topcellname.append(f'{howmany:02}_{suspicious_cells[i]["cellname"]}.png')
+            if howmany >= howmanyTOP:
+                break
+        if howmany < howmanyTOP:
+            for i in range(len(atypical_cells)):
+                tilefname = os.path.join(tilepath, f'{howmany+1:02}_{atypical_cells[i]["cellname"]}.png')
+                saveCellTile2PNG(medfile, tilefname, layerZ, atypical_cells[i])
+                howmany += 1
+                topcellname.append(f'{howmany:02}_{atypical_cells[i]["cellname"]}.png')
+                if howmany >= howmanyTOP:
+                    break
+        ## summarize to HTML file
+        wsimdata = {}
+        wsimdata['wsifname'] = os.path.splitext(os.path.basename(thisfile))[0]
+        htmlfname = f'{wsimdata["wsifname"]}.html'
+        htmlfpath = os.path.join(tilepath, htmlfname)
+        wsimdata['cellcount'] = cellcount
+        wsimdata['avgsamdata'] = getUROaverageOfSAcells(cellslist)
+        clisttop, wsimdata['avgtopdata'] = getUROaverageOfTopCells(cellslist, howmanyTOP, False)
+        wsimdata['topcell'] = clisttop
+        wsimdata['topname'] = topcellname
+        save2HTML(htmlfpath, wsimdata)
+        ##
+        consumed_time = f'{timedelta(seconds=time.perf_counter()-t0)}'
+        logger.info(f'took {consumed_time[:-3]} seconds to retrieve top {howmanyTOP} cells')
+    else:
+        logger.warning(f'only support AIxURO model for now, {medfile} is not a urine slide')
 

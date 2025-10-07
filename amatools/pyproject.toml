@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amatools"
-version = "0.0.5"
+version = "0.0.6"
 description = "model inference and metadata analysis toolkit"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["loguru", 
 				"shapely", "func_timeout",
-                "numpy", "pillow", "webp",
+                "numpy", "pillow", "webp", "scipy", 
 				"openslide-python",
+				"matplotlib", "pandas", "opencv-python", 
                 "pywin32", 
 				"PyYAML",
 				"psutil",

@@ -57,6 +57,29 @@ def replaceSpace2underscore(fname):
     return thisfile
 
 ##---------------------------------------------------------
+## return cell tile coordinates with segments data
+##---------------------------------------------------------
+def getCellTileCoordinates(segments):
+    lx, ly, rx, ry = 1000000, 1000000, 0, 0
+    for _, xy in enumerate(segments):
+        x , y = xy
+        if x < lx:
+            lx = x
+        if y < ly:
+            ly = y
+        if x > rx:
+            rx = x
+        if y > ry:
+            ry = y
+    #roix, roiy = lx-20, ly-20
+    roix = lx-20 if lx > 20 else 0
+    roiy = ly-20 if ly > 20 else 0
+    roiw = rx-lx+40
+    roih = ry-ly+40
+
+    return roix, roiy, roiw, roih
+
+##---------------------------------------------------------
 ## print out data on the stdout
 ##---------------------------------------------------------
 def dumpMetadata2stdout(infdata):
